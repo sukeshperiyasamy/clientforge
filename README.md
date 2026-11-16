@@ -1,91 +1,453 @@
 # ClientForge
 
-A working local studio for showcasing freelance work, generating social drafts with Antigravity CLI, preparing recurring content, scheduling approved posts through Postiz, and managing client enquiries.
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-19.1-61dafb.svg)](https://react.dev/)
+[![Express](https://img.shields.io/badge/Express-5.1-black.svg)](https://expressjs.com/)
+[![Node](https://img.shields.io/badge/Node.js-24.11+-339933.svg)](https://nodejs.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-WAL%20Mode-003B57.svg)](https://sqlite.org/)
+[![Postiz](https://img.shields.io/badge/Postiz-AGPL--3.0-orange.svg)](https://github.com/gitroomhq/postiz-app)
+[![License](https://img.shields.io/badge/License-Private-red.svg)]()
 
-## Open the installed system
+> **The local-first freelance acquisition engine and factual content studio.**  
+> Showcase verified work, generate grounded social content with Antigravity CLI, schedule multi-channel posts through Postiz, track client leads through a pipeline CRM, and maintain full data privacy on your own machine.
 
-- Dashboard: http://127.0.0.1:4310
-- Portfolio / enquiry preview: http://127.0.0.1:4310/portfolio
-- Self-hosted Postiz: http://localhost:4007
-- Local workflow diagnostics: http://localhost:8080
+---
 
-From this folder, start the built app with `./start.ps1`. It uses the locally installed portable Node runtime when present. Development: `npm run dev`. Rebuild after editing: `npm run build`. The app listens only on 127.0.0.1. Node 24.11+ is required for built-in SQLite. Dependencies are locked in package-lock.json; use `npm ci` on a fresh checkout.
+## Table of Contents
 
-On this machine npm can be used from `.tools/node-v24.11.1-win-x64/npm.cmd`; the start script adds that directory to PATH for its process. Docker Desktop was installed from the official winget package and runs the Postiz stack. No system-wide Node replacement was made.
+- [Overview & Philosophy](#overview--philosophy)
+- [Key Features](#key-features)
+- [Architecture & System Design](#architecture--system-design)
+- [Service Verticals](#service-verticals)
+- [Connectors & Platform Matrix](#connectors--platform-matrix)
+- [System Requirements](#system-requirements)
+- [Getting Started](#getting-started)
+- [Postiz Integration & Social Scheduling](#postiz-integration--social-scheduling)
+- [Operating the Studio](#operating-the-studio)
+- [Security & Sandboxing](#security--sandboxing)
+- [Data Storage, Backup & Disaster Recovery](#data-storage-backup--disaster-recovery)
+- [Development, Testing & Project Structure](#development-testing--project-structure)
+- [Attribution & Reused Software](#attribution--reused-software)
 
-## What works
+---
 
-- Four service groups: websites/UI/UX, mobile apps, Excel/data, and AI video/ComfyUI services.
-- Persistent project evidence, showcase permission, demonstration labels and local PNG/JPEG/WebP/MP4 uploads (50 MB maximum).
-- Real Antigravity generation through a background queue, validated structured responses and explicit failures. No simulated AI fallback.
-- Manual drafting, editing, version-specific approval and text export for any registered channel.
-- Recurring draft batches on selected weekdays and local times, project rotation, permission checks and restart deduplication. Runs more than 24 hours late are skipped. Ambiguous/nonexistent DST times are skipped by recurring rules.
-- Local publishing queue, time-zone conversion, cancellation, live account checks and Postiz submission/reconciliation.
-- Automatic adapter enabled for LinkedIn profiles/pages, Instagram variants, Facebook Pages, Threads, Bluesky, Mastodon and Telegram. Up to one attachment per automatic post. Media remains subject to provider/platform requirements.
-- X, YouTube, Pinterest, DEV, Reddit and Quora are manual export in this release. The underlying Postiz supports additional networks, but those adapters have not been enabled or tested here.
-- Enquiry form preview, manual lead entry, sources/campaigns, pipeline stages, project values with currencies, and next-action notes.
-- UTM link builder in the draft editor. The portfolio form records URL campaign/source values when no self-reported source is supplied.
-- Audit history, workspace export and consistent SQLite/media backup script.
+## Overview & Philosophy
 
-The workspace includes one explicitly labelled ClientForge development demo and one real Antigravity-generated LinkedIn draft. There are no fabricated clients, testimonials or acquisition metrics. No live social posts have been sent.
+ClientForge is purpose-built for independent freelancers, solo developers, and studio founders aiming to build a durable pipeline of international clients. Rather than relying on spammy direct messages, low-margin bidding wars, or fabricated social proof, ClientForge operates on a **truth-in-advertising** foundation:
 
-## Connect accounts when your details are ready
+1. **Grounded in Fact**: Content drafts are synthesized strictly from structured project evidence (problems solved, deliverables, client permissions, and measurable outcomes). No fabricated testimonials, false revenue metrics, or fake clients.
+2. **Strict Verification**: Demo and personal projects are explicitly labelled as demos. Client confidentiality is guarded by rigorous showcase permission toggles.
+3. **Local Sovereignty**: Runs 100% locally on loopback (`127.0.0.1`). SQLite with Write-Ahead Logging (WAL), Windows DPAPI-encrypted credential vaults, and sandboxed AI execution ensure that private business data and credentials never leave your control.
+4. **Separation of Concerns**: AI drafts the content; the human approves the immutable version hash; the application manages scheduling and publishing.
 
-1. Open the local Postiz URL. Create your own owner login; do not share the password in chat.
-2. Configure the platform developer applications required by the channels you choose. The official self-hosting documentation explains API keys, redirect URIs and account eligibility: https://docs.postiz.com/self-host/providers/overview
-3. Connect accounts inside Postiz. Some providers require a publicly reachable HTTPS callback; a localhost installation alone does not complete every OAuth flow.
-4. Generate a Postiz API key in its settings. Copy `.env.example` to `.env` and set POSTIZ_API_KEY locally. Do not commit it. The default local base URL is `http://localhost:4007/api/public/v1`; hosted Postiz uses `https://api.postiz.com/public/v1`.
-5. Restart ClientForge and click **Channels → Sync from Postiz**.
-6. Add real profile details and permission-cleared projects. Generate and review content.
-7. After reviewing the first real post, set PUBLISHING_ENABLED=true in .env, restart, approve the exact version, schedule it and resume the queue. Both the environment switch and dashboard pause must permit publication.
-8. Check remote status using **Check provider**. `submitted` means accepted by Postiz, not confirmed published. Manage already-submitted posts in Postiz; the local pause cannot retract them.
+---
 
-## Regular operation
+## Key Features
 
-Use **Content cadence** to define recurring draft preparation. It spends the authenticated Antigravity account's usage allowance only when enabled. New rules default to disabled. Review the resulting drafts and schedule approved content. The publishing pause controls local publication, not content generation; disable a cadence rule to stop its generation jobs.
+- **Project Evidence & Asset Vault**: Store client case studies, problem-solution narratives, deliverables, metrics, and media files (PNG, JPEG, WebP, MP4 up to 50 MB).
+- **Sandboxed Antigravity AI Drafting**: Uses the Google Antigravity CLI (`agy`) with strict session-scoped sandbox policies (`deny: command, read_file, write_file, mcp, url`) and Zod schema-enforced structured JSON output.
+- **Multi-Platform Publishing via Postiz**: Connects to an isolated self-hosted Postiz container stack to publish across LinkedIn, Facebook Pages, Instagram, Threads, Bluesky, Mastodon, and Telegram.
+- **Immutable Approval Engine**: Every post version is cryptographically fingerprinted (SHA-256). Any subsequent modification to content or source project evidence automatically invalidates existing approval.
+- **Automated Content Cadence**: Define weekly scheduling rules by service and channel with IANA timezone calculations and daylight saving time (DST) safeguards.
+- **Client Lead CRM & Attribution**: Track enquiries from initial touchpoint through to project closure (`New` &rarr; `Contacted` &rarr; `Qualified` &rarr; `Proposal` &rarr; `Won` &rarr; `Lost`) with full UTM parameter attribution.
+- **Dedicated Project Browser**: Spawns an isolated Chromium profile via Playwright for manual platform verification, community engagement, and OAuth consent flows without polluting your daily browser.
 
-The computer and ClientForge process must remain on for local recurring generation and publication. Docker Desktop must run for self-hosted Postiz. The installation is not a Windows background service and does not start at sign-in automatically. Run `./postiz.ps1 status`, `./postiz.ps1 start` or `./postiz.ps1 stop` to manage only this Postiz installation. Stopping preserves volumes. Do not run `down -v` unless intentionally destroying all Postiz data.
+---
 
-Antigravity authentication uses the user's existing local CLI account. It has been tested with installed CLI 1.5.9. Session-scoped permissions deny file access, commands, URL access and MCP tools; generation receives evidence via stdin and runs in an isolated empty working directory. Publishing credentials are excluded from its environment. This is a drafting integration, not a general agent command execution endpoint.
+## Architecture & System Design
 
-## Reliability and data
+```mermaid
+flowchart TD
+    subgraph Client["Presentation Layer (Local Loopback)"]
+        UI["React 19 SPA<br/>(Vite / Tailwind / Lucide)"]
+        Portfolio["Public Portfolio Preview<br/>/portfolio"]
+        Browser["Dedicated Project Browser<br/>(Playwright Chromium)"]
+    end
 
-Data lives under ignored `data/`: SQLite with WAL, uploads, the agent workspace and the generated Postiz compose configuration. The compose generator creates unique passwords/JWT secret and binds exposed services to loopback. Never publish or commit that configuration. Docker data is in persistent named volumes under project `clientforge-postiz`.
+    subgraph Server["Application Layer (Node.js 24 / Express 5)"]
+        API["Express HTTP API<br/>127.0.0.1:4310"]
+        Auth["Owner Security & Session<br/>scrypt + CSRF + Timing-Safe"]
+        Domain["Domain Engine<br/>Approvals, Invariants, Hashes"]
+        Worker["Durable Background Worker<br/>Queue, Cadence & Retry Manager"]
+    end
 
-Approvals include a content-version hash. Editing evidence invalidates dependent approvals; editing posts cancels pending local schedules. Duplicate version/account submissions are blocked, even if a different scheduled time is chosen. In-flight jobs become `unknown` after restart and are not retried. Network/server ambiguity requires provider reconciliation. Confirmed failures also have no automatic retry in this release; inspect them before creating a new reviewed version.
+    subgraph Data["Persistence & Storage Layer"]
+        SQLite[("SQLite 3 (node:sqlite)<br/>WAL Mode & Transactions")]
+        Media["Local Media Directory<br/>data/uploads/"]
+        Vault["Encrypted Local Vault<br/>AES-256-GCM + Windows DPAPI"]
+    end
 
-`node scripts/backup.mjs` makes a consistent database snapshot and copies its referenced media. Restore with ClientForge stopped: preserve a backup of current data, replace clientforge.sqlite and uploads with the chosen snapshot, and remove stale SQLite WAL/SHM sidecars only after verifying the process is stopped. The JSON export is for portability/review and has no import UI. Back up Postiz's PostgreSQL/config/uploads volumes separately using standard Docker/Postgres backup procedures. Keep .env separately and protect backups as private client data.
+    subgraph Integrations["External & Worker Integrations"]
+        AGY["Antigravity CLI (agy)<br/>Sandboxed Headless Drafting"]
+        PostizStack["Docker Compose Stack<br/>Postiz API (localhost:4007)"]
+        Social["Social Platforms<br/>LinkedIn, IG, Threads, Bluesky..."]
+    end
 
-## Development and extension
+    UI -->|HTTP + CSRF| API
+    Portfolio -->|Lead Submission| API
+    Browser -.->|Manual / OAuth Flows| API
 
-```text
-src/                 React dashboard and local portfolio preview
-shared/model.ts      Schemas, service catalogue and channel registry
-shared/time.ts       IANA timezone scheduling and DST handling
-server/app.ts        Validated HTTP API and local session protection
-server/domain.ts     Approval and queue invariants
-server/worker.ts     Durable generation, recurring rules and submission worker
-server/antigravity.ts CLI adapter, prompt constraints and response validation
-server/postiz.ts     Official Postiz API contract adapter
-server/store.ts      Transactional SQLite storage
-tests/system.test.ts Integration, state transition and boundary tests
-scripts/             Installation configuration and backup utilities
+    API --> Auth
+    API --> Domain
+    API --> SQLite
+    API --> Media
+    API --> Vault
+
+    Worker --> SQLite
+    Worker --> Domain
+    Worker -->|Subprocess Stdin/Stdout| AGY
+    Worker -->|REST API| PostizStack
+
+    PostizStack -->|Official APIs| Social
 ```
 
-To add a channel, extend the registry, implement and verify its required provider settings/media constraints, then enable automatic mode. Manual export is the fallback until verified. Do not remove review requirements for communities. Keep platform account capabilities separate from the service catalogue. Implement another publishing provider behind the accounts/upload/publish/reconcile interface rather than embedding platform logic in UI components.
+---
 
-Verification: `npm test` and `npm run build`. Tests exercise approval invalidation, duplicate prevention, revoked permission, community restrictions, restart recovery, nested rollback, DST conversion, recurring-job deduplication/backlog handling, generation failures, pause races, ambiguous submission, provider payloads, local API authentication/origin/host protection, invalid media and enquiry attribution.
+## Service Verticals
 
-## Current limits and next deployment milestone
+ClientForge structures all projects, content generation, and client enquiries around four specialized service offerings:
 
-This is a single-owner local application, not a publicly deployed or multi-tenant SaaS. Its local session protects against cross-site browser calls, but is not a substitute for internet-facing identity/access control. Do not expose port 4310 through a tunnel or reverse proxy. The portfolio is currently a preview; outside clients cannot visit localhost.
+| Vertical | Target Buyer | Typical Evidence | Call to Action |
+| :--- | :--- | :--- | :--- |
+| **Web Development & UI/UX** | Founders, agencies, small businesses | Live demos, screen recordings, design system comparisons, audits | *Request a project estimate* |
+| **iOS & Android Apps** | Startups, product managers, founders | App walkthroughs, delivery scope, interactive prototypes | *Discuss an app idea* |
+| **Excel & Data Analysis** | Operations, finance and analytics teams | Anonymized before/after spreadsheets, formula logic, dashboards | *Describe your spreadsheet problem* |
+| **AI Video & ComfyUI** | Creators, agencies, creative studios | Video samples, ComfyUI workflow pipelines, setup blueprints | *Request a workflow consultation* |
 
-Before public launch, deploy a separate public portfolio/enquiry endpoint with HTTPS, owner authentication and tenant isolation for the private dashboard, a supported public ingest path to the lead store, privacy/retention settings and abuse controls. For multiple workers or high volume, migrate record storage to PostgreSQL with indexed queue queries and atomic worker leases. Add account capability-specific media validation, automatic confirmed-publication polling, provider-specific analytics and observability. Add CI and operational restore tests before external production use.
+---
 
-No email/DM sending, automated marketplace proposals, mass community promotion, paid subscriptions, generated videos or ComfyUI execution are enabled. Those are optional later integrations, not prerequisites for showcasing those freelance services. Client acquisition depends on portfolio quality, offer and conversations; the software does not guarantee clients. Current reporting covers workspace activity and lead sources, not cross-network impressions or verified click-to-sale causality.
+## Connectors & Platform Matrix
 
-## Reused software
+ClientForge provides built-in definitions for 30+ platforms grouped into six functional categories:
 
-Postiz is run unmodified as a separate service using its official deployment repository: https://github.com/gitroomhq/postiz-docker-compose (checkout `dd4969e5e694cd009619a0d53cff14c21104580b`). The application source is https://github.com/gitroomhq/postiz-app and its current licence is AGPL-3.0. Keep its notices and review applicable licence obligations before distributing modified versions. The custom studio integrates through the documented public API: https://docs.postiz.com/public-api/introduction
+| Platform | Category | Classification | Publishing Adapter | Status & Capabilities |
+| :--- | :--- | :--- | :---: | :--- |
+| **LinkedIn (Profile & Page)** | Social Media | Official API | Postiz | **Automatic** &middot; 3,000 chars &middot; Media optional |
+| **Facebook Pages** | Social Media | Official API | Postiz | **Automatic** &middot; 5,000 chars &middot; Media optional |
+| **Instagram & Standalone** | Social Media | Official API | Postiz | **Automatic** &middot; 2,200 chars &middot; **Media required** |
+| **Threads** | Social Media | Official API | Postiz | **Automatic** &middot; 500 chars &middot; Media optional |
+| **Bluesky** | Social Media | Official API | Postiz | **Automatic** &middot; 300 chars &middot; Media optional |
+| **Mastodon** | Social Media | Official API | Postiz | **Automatic** &middot; 500 chars &middot; Instance rules apply |
+| **Telegram** | Social Media | Official API | Postiz | **Automatic** &middot; 4,096 chars &middot; Media optional |
+| **X (Twitter)** | Social Media | Official API | Postiz | **Manual Export** &middot; Adapter disabled by default |
+| **YouTube** | Video & Social | OAuth Account | Native PKCE | **Channel Identity Only** (`youtube.readonly`) |
+| **GitHub** | Developer Hub | OAuth Account | Native PKCE | **Identity Only** &middot; Public profile verification |
+| **Marketplaces**<br/>*(Upwork, Fiverr, Freelancer, Contra, Toptal)* | Marketplaces | Browser-Assisted | Manual | **Manual Only** &middot; Dedicated browser profile for human proposals |
+| **Communities**<br/>*(Reddit, Hacker News, Indie Hackers, Quora)* | Discussion | Browser-Assisted | Manual | **Manual Only** &middot; Human-reviewed participation; no auto-posting |
+| **Publishing**<br/>*(Buffer, WordPress, Ghost, Substack)* | CMS & Marketing | API Key / Webhook | Buffer / Manual | Account validation & staging |
 
-Antigravity reference: https://antigravity.google/docs/cli/headless/
+---
+
+## System Requirements
+
+- **Operating System**: Windows 10/11 (64-bit), macOS 13+, or Linux.
+- **Node.js**: v24.11.0 or newer (required for built-in `node:sqlite` and cryptographic primitives).
+- **Package Manager**: npm v10+ (dependencies locked in `package-lock.json`).
+- **Docker Desktop**: Required to host the local Postiz publishing stack.
+- **Google Antigravity CLI (`agy`)**: Installed and authenticated locally for headless AI generation.
+- **Web Browser**: Google Chrome or Chromium (used by Playwright for the dedicated browser profile).
+
+---
+
+## Getting Started
+
+### 1. Clone & Configure Environment
+
+```powershell
+# Clone the repository
+git clone https://github.com/sukeshperiyasamy/clientforge.git
+cd clientforge
+
+# Create your local environment configuration
+Copy-Item .env.example .env
+```
+
+Edit `.env` to set your desired port and configuration:
+
+```ini
+PORT=4310
+DATA_DIR=data
+AGY_PATH=agy
+POSTIZ_URL=http://localhost:4007/api/public/v1
+POSTIZ_API_KEY=
+PUBLISHING_ENABLED=false
+```
+
+> [!IMPORTANT]
+> Keep `PUBLISHING_ENABLED=false` until you have verified your accounts and reviewed your initial test posts.
+
+### 2. Install Dependencies & Build Frontend
+
+```powershell
+# Install locked dependencies
+npm ci
+
+# Build the React production bundle
+npm run build
+```
+
+### 3. Launch ClientForge
+
+You can start the studio using the included PowerShell script (which automatically detects portable Node runtimes if present):
+
+```powershell
+./start.ps1
+```
+
+Or start directly with npm:
+
+```powershell
+# Production mode
+npm start
+
+# Development mode (with Vite HMR)
+npm run dev
+```
+
+### 4. Open the Applications
+
+- **Dashboard**: [http://127.0.0.1:4310](http://127.0.0.1:4310) (also listens on legacy port 3000 if default).
+- **Public Portfolio Preview**: [http://127.0.0.1:4310/portfolio](http://127.0.0.1:4310/portfolio)
+- **Self-Hosted Postiz Console**: [http://localhost:4007](http://localhost:4007)
+
+---
+
+## Postiz Integration & Social Scheduling
+
+Postiz runs as a self-contained Docker Compose stack, keeping third-party OAuth tokens and social credentials isolated from your main application.
+
+### 1. Initialize Postiz Configuration
+
+Generate the hardened `docker-compose.yaml` with cryptographically secure random secrets bound to loopback:
+
+```powershell
+node scripts/prepare-postiz.mjs
+```
+
+### 2. Manage the Postiz Stack
+
+Use the included helper script to control Postiz containers:
+
+```powershell
+# Start Postiz containers
+./postiz.ps1 start
+
+# Check container health and status
+./postiz.ps1 status
+
+# View live application logs
+./postiz.ps1 logs
+
+# Stop containers (preserves database volumes)
+./postiz.ps1 stop
+```
+
+> [!CAUTION]
+> Never run `docker compose down -v` against the `clientforge-postiz` project, as this will permanently erase your Postiz database and connected social tokens.
+
+### 3. Connect Channels
+
+1. Open [http://localhost:4007](http://localhost:4007) in your browser.
+2. Complete the initial admin registration (store these credentials securely).
+3. Connect your social channels (LinkedIn, Instagram, Facebook Pages, etc.) within the Postiz UI.
+4. Go to **Settings &rarr; API** in Postiz and generate a Public API Key.
+5. Paste this key into your local `.env` file as `POSTIZ_API_KEY=your_key_here`.
+6. Restart ClientForge, navigate to the **Channels** tab, and click **Sync from Postiz**.
+
+---
+
+## Operating the Studio
+
+### The Acquisition Workflow
+
+```
+1. Add Project Evidence  -->  2. Generate Drafts  -->  3. Review & Edit  -->  4. Approve & Schedule  -->  5. Track Leads
+   • Problem & Solution        • Multi-platform          • Enforce facts       • Cryptographic hash      • Pipeline stage
+   • Deliverables & Metrics    • Antigravity CLI         • Adjust hooks        • Postiz auto-publish     • Value & currency
+   • Showcase permission       • JSON schema             • CTA & UTM links     • Provider verification   • UTM campaign
+```
+
+### 1. Adding a Project
+Navigate to **Projects** and define a case study. Clearly describe the client's problem, your technical solution, measurable results, and upload visual proof (screenshots, recordings). If working with confidential client data, ensure that details are anonymized and the **Showcase Permission** checkbox is accurately toggled.
+
+### 2. Generating Content with Antigravity
+Select an active project, choose target channels, and click **Generate Drafts**. The backend launches a headless Antigravity process in an empty, sandboxed workspace, feeding project reference data through standard input. The resulting draft includes hooks, body copy, hashtag recommendations, and calls to action.
+
+### 3. Review, Approval & Invalidation
+Every generated draft must be reviewed by the owner. When you click **Approve**, ClientForge computes a SHA-256 hash of the content:
+
+$$\text{approvedHash} = \text{SHA256}(\text{title} + \text{content} + \text{assetIds})$$
+
+If you or a background process subsequently edits any text or asset, the approval is immediately revoked (`status = draft`), preventing unverified changes from reaching scheduled publication.
+
+### 4. Content Cadence & Recurring Automation
+Under **Cadence**, establish weekly publishing rules (e.g., *Post a Web Case Study to LinkedIn every Tuesday at 10:00 AM*). The background worker:
+- Respects recipient IANA time zones.
+- Adjusts for daylight saving transitions.
+- Deduplicates jobs across server restarts.
+- Skips jobs that are more than 24 hours overdue.
+
+### 5. Managing Leads
+Prospective clients who submit enquiries via `/portfolio` or direct UTM links appear in the **Leads** CRM. Update stages from `New` through `Won`, attach next-action notes, and track revenue closed by service vertical and acquisition campaign.
+
+---
+
+## Security & Sandboxing
+
+ClientForge adheres to a defense-in-depth security model:
+
+### 1. Network Boundary
+- The Express server strictly binds to `127.0.0.1`. It does not accept remote network traffic.
+- Postiz compose configuration explicitly binds internal ports (`4007`, `5432`, `6379`) to `127.0.0.1`.
+
+### 2. Antigravity Sandbox Policy
+The Antigravity CLI process is restricted using explicit session permissions:
+```json
+{
+  "permissions": {
+    "deny": [
+      "command(*)",
+      "read_file(*)",
+      "write_file(*)",
+      "read_url(*)",
+      "execute_url(*)",
+      "mcp(*)"
+    ],
+    "allow": [],
+    "ask": []
+  }
+}
+```
+All project and profile inputs are treated as untrusted text strings inside the prompt, and publishing credentials (`POSTIZ_API_KEY`, OAuth tokens) are scrubbed from the subprocess environment.
+
+### 3. Local Credential Vault
+- **Windows**: Keys are encrypted using the Windows Data Protection API (DPAPI) and stored on disk with restrictive Access Control Lists (`Set-Acl` granting access only to the current user SID and System).
+- **At Rest**: Individual tokens are encrypted with `AES-256-GCM` using authenticated additional data (AAD).
+
+### 4. Owner Authentication & CSRF Protection
+- Password hashing uses `scrypt` ($N=32768, r=8, p=1$) with a unique 16-byte cryptographic salt.
+- Verifications use `crypto.timingSafeEqual` to thwart timing attacks.
+- Brute-force protection locks logins after 5 failed attempts per 15-minute window.
+- State-changing API endpoints require both an `HttpOnly` cookie and a matching `x-csrf-token` header.
+
+---
+
+## Data Storage, Backup & Disaster Recovery
+
+All state is preserved inside the `.gitignore`-protected `data/` directory:
+
+```text
+data/
+├── clientforge.sqlite         # Primary transactional database
+├── clientforge.sqlite-wal     # Write-Ahead Log
+├── clientforge.sqlite-shm     # Shared memory index
+├── uploads/                   # Media attachments (PNG, JPEG, WebP, MP4)
+├── vault/                     # Encrypted credential storage
+├── postiz/                    # Docker Compose configuration and state
+└── logs/                      # Server and worker logs
+```
+
+### Performing a Consistent Backup
+
+Run the automated backup script to create an atomic SQLite snapshot and copy all referenced media files:
+
+```powershell
+node scripts/backup.mjs
+```
+
+This creates a timestamped snapshot in `data/backups/backup-YYYY-MM-DDTHH-mm-ss/`.
+
+### Disaster Recovery Procedure
+
+To restore from a backup:
+1. Ensure ClientForge is stopped: `Stop-Process -Name node -ErrorAction SilentlyContinue`.
+2. Move or archive the existing `data/clientforge.sqlite` and `data/uploads/`.
+3. Copy `clientforge.sqlite` from the backup folder into `data/`.
+4. Copy the backup `uploads/` folder into `data/uploads/`.
+5. Remove any leftover `clientforge.sqlite-wal` or `clientforge.sqlite-shm` files to prevent state corruption.
+6. Restart ClientForge with `./start.ps1`.
+
+---
+
+## Development, Testing & Project Structure
+
+### Repository Layout
+
+```text
+clientforge/
+├── .env.example             # Template for local environment variables
+├── .gitignore               # Strict exclusion rules for data, logs, and secrets
+├── index.html               # Frontend HTML root
+├── launch-browser.ps1       # Script to launch dedicated project browser
+├── package.json             # Scripts and production dependencies
+├── postiz.ps1               # Docker Compose management wrapper
+├── start.ps1                # Main application launcher
+├── tsconfig.json            # Strict TypeScript configuration
+├── vite.config.ts           # Vite bundler configuration
+│
+├── browser/                 # Browser broker configuration and runtime state
+├── docs/                    # Architecture diagrams and UI screenshots
+│   └── dashboard.jpg        # Studio dashboard preview
+│
+├── scripts/                 # Operational and maintenance automation
+│   ├── backup.mjs           # Atomic SQLite and media backup utility
+│   ├── install-shortcut.ps1 # Desktop shortcut installer
+│   ├── launch-browser.ts    # Browser launcher with health check
+│   ├── prepare-postiz.mjs   # Hardened compose generator
+│   └── register-startup.ps1 # Optional Windows startup task installer
+│
+├── server/                  # Backend Express and worker services
+│   ├── antigravity.ts       # Headless CLI integration and sandboxing
+│   ├── app.ts               # REST API routes and request validators
+│   ├── config.ts            # Environment loader and secret sanitizer
+│   ├── connection-routes.ts # Connector and OAuth endpoints
+│   ├── connections.ts       # Platform connector business logic
+│   ├── domain.ts            # State machines, hash computation, invariants
+│   ├── index.ts             # Server entry point and HTTP listeners
+│   ├── postiz.ts            # Postiz Public API client
+│   ├── security.ts          # DPAPI vault, scrypt auth, and ACL protection
+│   ├── store.ts             # Transactional SQLite repository
+│   └── worker.ts            # Queue consumer, cadence rules, and retries
+│
+├── shared/                  # Universal models and contracts
+│   ├── connectors.ts        # 30+ platform definitions and limitations
+│   ├── model.ts             # Zod schemas for projects, posts, and leads
+│   └── time.ts              # IANA timezone calculations and DST handling
+│
+├── src/                     # Frontend React application
+│   ├── api.ts               # Typed client API client
+│   ├── AuthGate.tsx         # Password protection and setup modal
+│   ├── ConnectionsPage.tsx  # Multi-channel connector dashboard
+│   ├── main.tsx             # Main application UI and workflow views
+│   └── style.css            # Custom responsive design system
+│
+└── tests/                   # Automated test suite
+    └── system.test.ts       # 480+ lines of end-to-end integration tests
+```
+
+### Running Tests
+
+The test suite covers approval invalidation, duplicate prevention, revoked permission handling, restart recovery, timezone conversion, generation errors, and security constraints:
+
+```powershell
+# Run the integration test suite
+npm test
+
+# Run TypeScript static type checking
+npm run check
+```
+
+---
+
+## Attribution & Reused Software
+
+- **[Postiz](https://github.com/gitroomhq/postiz-app)**: Open-source social media scheduling architecture ([AGPL-3.0 License](https://github.com/gitroomhq/postiz-app/blob/main/LICENSE.md)). ClientForge interfaces with Postiz via its official [Public REST API](https://docs.postiz.com/public-api/introduction) without modifying Postiz application binaries.
+- **[Google Antigravity](https://antigravity.google/)**: AI drafting via the official [Antigravity CLI](https://antigravity.google/docs/cli/headless/).
+- **[Playwright](https://playwright.dev/)**: Browser automation driving the isolated project browser profile.
+- **[Lucide Icons](https://lucide.dev/)**: Clean, consistent icon set for the studio interface.
+
+---
+
+## License
+
+This project configuration and custom studio source code are maintained as a private, single-owner freelance productivity suite. Consult third-party licenses (such as Postiz AGPL-3.0) for compliance regarding bundled or external service distributions.
