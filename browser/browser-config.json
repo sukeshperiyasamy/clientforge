@@ -1,0 +1,8 @@
+{
+  "profileName": "FreelanceGrowth",
+  "homepage": "http://localhost:3000/connections",
+  "channel": "chromium",
+  "brokerPort": 4312,
+  "downloadLimitMB": 250,
+  "notes": "Only this project's browser/profile directory is used. Personal profiles are never imported. The broker is the only profile writer."
+}
