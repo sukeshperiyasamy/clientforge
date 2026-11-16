@@ -19,7 +19,17 @@ export const config = {
 };
 export function safeError(e: unknown): string {
   let message = e instanceof Error ? e.message : "Operation failed";
-  for (const secret of [config.postizKey,process.env.GITHUB_CLIENT_SECRET,process.env.GOOGLE_CLIENT_SECRET])
+  for (const secret of [
+    config.postizKey,
+    process.env.GITHUB_CLIENT_SECRET,
+    process.env.GOOGLE_CLIENT_SECRET,
+  ])
     if (secret) message = message.split(secret).join("[redacted]");
-  return message.replace(/(Bearer\s+)[\w.\-]+/gi,'$1[redacted]').replace(/((?:access_token|refresh_token|client_secret|code_verifier|password)["'=:\s]+)[^\s,;"}]+/gi,'$1[redacted]').slice(0, 1000);
+  return message
+    .replace(/(Bearer\s+)[\w.\-]+/gi, "$1[redacted]")
+    .replace(
+      /((?:access_token|refresh_token|client_secret|code_verifier|password)["'=:\s]+)[^\s,;"}]+/gi,
+      "$1[redacted]",
+    )
+    .slice(0, 1000);
 }

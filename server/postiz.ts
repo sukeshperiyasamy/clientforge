@@ -9,6 +9,9 @@ export class ProviderError extends Error {
   constructor(
     message: string,
     public uncertain = false,
+    public retryable = false,
+    public httpStatus?: number,
+    public retryAfterMs?: number,
   ) {
     super(message);
   }
@@ -41,12 +44,25 @@ export class PostizProvider {
       throw new ProviderError(
         "Postiz could not be reached. Check its status. Submission outcome may need reconciliation.",
         mayPublish,
+        !mayPublish,
       );
     }
+    const retryHeader = response.headers.get("retry-after");
+    const retryAfter = retryHeader
+      ? Math.max(
+          0,
+          Number.isFinite(Number(retryHeader))
+            ? Number(retryHeader) * 1000
+            : Date.parse(retryHeader) - Date.now(),
+        )
+      : undefined;
     if (!response.ok)
       throw new ProviderError(
         `Postiz returned HTTP ${response.status}. Check account permissions and provider settings.`,
         mayPublish && response.status >= 500,
+        response.status === 429 && (!retryAfter || retryAfter <= 30 * 86400000),
+        response.status,
+        retryAfter && Number.isFinite(retryAfter) ? retryAfter : undefined,
       );
     try {
       return await response.json();
@@ -137,6 +153,7 @@ export class PostizProvider {
             id: z.string(),
             content: z.string(),
             state: z.string(),
+            releaseURL: z.string().optional().nullable(),
             integration: z.object({ id: z.string() }),
           }),
         ),
@@ -158,7 +175,15 @@ export class PostizProvider {
       );
     const post = matches[0];
     if (post.state === "PUBLISHED")
-      return { status: "published" as const, remoteId: post.id };
+      return {
+        status: "published" as const,
+        remoteId: post.id,
+        publishedAt: now(),
+        publishedUrl:
+          post.releaseURL && /^https?:\/\//.test(post.releaseURL)
+            ? post.releaseURL
+            : undefined,
+      };
     if (post.state === "ERROR")
       return { status: "failed" as const, remoteId: post.id };
     return { status: "submitted" as const, remoteId: post.id };

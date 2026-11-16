@@ -1,0 +1,36 @@
+.connection-safety {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin: 0 0 24px;
+  padding: 12px 15px;
+  border: 1px solid #e1e6ed;
+  border-radius: 7px;
+  background: #fff;
+}
+.connection-safety > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #8b99ab;
+  font-size: 10px;
+}
+.connection-safety button {
+  font-size: 10px;
+  white-space: nowrap;
+}
+.sidebar-signout {
+  display: block;
+  color: #9ba8bc;
+  background: none;
+  font-size: 10px;
+  padding: 0 0 18px 4px;
+  text-align: left;
+}
+.connection-url {
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+}

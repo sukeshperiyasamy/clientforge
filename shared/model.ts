@@ -244,6 +244,10 @@ export type Job = {
   remoteId: string | null;
   error: string | null;
   createdAt: string;
+  nextAttemptAt?: string;
+  lastAttemptAt?: string;
+  publishedAt?: string;
+  publishedUrl?: string;
 };
 export type Generation = {
   id: string;

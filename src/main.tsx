@@ -55,8 +55,8 @@ import {
 } from "../shared/model";
 import { zonedToIso } from "../shared/time";
 import "./style.css";
-import { ConnectionsPage } from './ConnectionsPage';
-import { AuthGate } from './AuthGate';
+import { ConnectionsPage } from "./ConnectionsPage";
+import { AuthGate } from "./AuthGate";
 
 const nav = [
   { id: "overview", label: "Overview", icon: BarChart3 },
@@ -202,7 +202,9 @@ function Modal({
 type Run = (task: () => Promise<unknown>, message?: string) => Promise<void>;
 function App() {
   const [state, setState] = useState<State>();
-  const [page, setPage] = useState(location.pathname==='/connections'?'connections':'overview');
+  const [page, setPage] = useState(
+    location.pathname === "/connections" ? "connections" : "overview",
+  );
   const [notice, setNotice] = useState<{ message: string; error: boolean }>();
   const [busy, setBusy] = useState(false);
   const [fatal, setFatal] = useState("");
@@ -266,7 +268,7 @@ function App() {
     );
   const changePage = (id: string) => {
     setPage(id);
-    history.replaceState(null,'',id==='connections'?'/connections':'/');
+    history.replaceState(null, "", id === "connections" ? "/connections" : "/");
     setMenu(false);
   };
   const approved = state.posts.filter((p) => p.status === "approved").length;
@@ -339,6 +341,17 @@ function App() {
           <div className="sidebar-foot">
             <ShieldCheck size={15} /> Private, local workspace <span>v0.1</span>
           </div>
+          <button
+            className="sidebar-signout"
+            onClick={() =>
+              doRun(async () => {
+                await api("/auth/logout", {});
+                location.reload();
+              })
+            }
+          >
+            Sign out of dashboard
+          </button>
         </div>
       </aside>
       <main>
@@ -1019,6 +1032,31 @@ function App() {
                               {j.remoteId && (
                                 <small>Remote ID: {j.remoteId}</small>
                               )}
+                              {j.publishedAt && (
+                                <small>
+                                  Confirmed:{" "}
+                                  {date(j.publishedAt, state.settings.timezone)}
+                                </small>
+                              )}
+                              {j.publishedUrl && (
+                                <a
+                                  className="text-button"
+                                  href={j.publishedUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  View published post <ExternalLink size={13} />
+                                </a>
+                              )}
+                              {j.nextAttemptAt && j.status === "scheduled" && (
+                                <small>
+                                  Retry after:{" "}
+                                  {date(
+                                    j.nextAttemptAt,
+                                    state.settings.timezone,
+                                  )}
+                                </small>
+                              )}
                             </td>
                             <td>{names[j.snapshot.platform]}</td>
                             <td>
@@ -1189,7 +1227,7 @@ function App() {
               )}
             </>
           )}
-          {page === 'connections' && <ConnectionsPage/>}
+          {page === "connections" && <ConnectionsPage posts={state.posts} />}
           {page === "channels" && (
             <>
               <PageHeading
@@ -2767,5 +2805,11 @@ function Portfolio() {
   );
 }
 createRoot(document.getElementById("root")!).render(
-  location.pathname === "/portfolio" ? <Portfolio /> : <AuthGate><App /></AuthGate>,
+  location.pathname === "/portfolio" ? (
+    <Portfolio />
+  ) : (
+    <AuthGate>
+      <App />
+    </AuthGate>
+  ),
 );

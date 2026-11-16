@@ -28,8 +28,8 @@ import {
   type Rule,
 } from "../shared/model.ts";
 import { nextRuleRun } from "../shared/time.ts";
-import { OwnerAuth } from './security.ts';
-import { connectionRoutes } from './connection-routes.ts';
+import { OwnerAuth } from "./security.ts";
+import { connectionRoutes } from "./connection-routes.ts";
 
 export function createApp(store: Store, provider = new PostizProvider()) {
   const app = express();
@@ -44,7 +44,9 @@ export function createApp(store: Store, provider = new PostizProvider()) {
     if (!["127.0.0.1", "localhost", "[::1]"].includes(host))
       return res.status(403).json({ error: "This application is local-only." });
     const origin = req.get("origin");
-    const callback = /^\/auth\/(github|youtube)\/callback$/.test(req.path) && req.method==='GET';
+    const callback =
+      /^\/auth\/(github|youtube)\/callback$/.test(req.path) &&
+      req.method === "GET";
     if (!callback && origin && origin !== `http://${req.get("host")}`)
       return res
         .status(403)
@@ -63,23 +65,44 @@ export function createApp(store: Store, provider = new PostizProvider()) {
     next();
   });
   app.use(express.json({ limit: "256kb" }));
-  app.get('/api/auth/status',(_req,res)=>res.json({needsSetup:!auth.configured()}));
-  app.post('/api/auth/setup',(req,res)=>{const {password}=z.object({password:z.string()}).parse(req.body);auth.setup(password);const login=auth.login(password,req.socket.remoteAddress||'local');auth.cookie(res,login.token);res.json({csrf:login.session.csrf});});
-  app.post('/api/auth/login',(req,res)=>{const {password}=z.object({password:z.string()}).parse(req.body);const login=auth.login(password,req.socket.remoteAddress||'local');auth.cookie(res,login.token);res.json({csrf:login.session.csrf});});
-  app.get("/api/session", (req, res) => {
-    const session=auth.session(req);
-    if(!session)return res.status(401).json({error:'Sign in to your local dashboard.',needsSetup:!auth.configured()});
-    res.json({ csrf:session.csrf });
+  app.get("/api/auth/status", (_req, res) =>
+    res.json({ needsSetup: !auth.configured() }),
+  );
+  app.post("/api/auth/setup", (req, res) => {
+    const { password } = z.object({ password: z.string() }).parse(req.body);
+    auth.setup(password);
+    const login = auth.login(password, req.socket.remoteAddress || "local");
+    auth.cookie(res, login.token);
+    res.json({ csrf: login.session.csrf });
   });
-  const connection=connectionRoutes(store,auth);
-  app.get('/auth/:id/callback',connection.callback);
-  app.get('/auth/:id/start',connection.start);
+  app.post("/api/auth/login", (req, res) => {
+    const { password } = z.object({ password: z.string() }).parse(req.body);
+    const login = auth.login(password, req.socket.remoteAddress || "local");
+    auth.cookie(res, login.token);
+    res.json({ csrf: login.session.csrf });
+  });
+  app.get("/api/session", (req, res) => {
+    const session = auth.session(req);
+    if (!session)
+      return res.status(401).json({
+        error: "Sign in to your local dashboard.",
+        needsSetup: !auth.configured(),
+      });
+    res.json({ csrf: session.csrf });
+  });
+  const connection = connectionRoutes(store, auth);
+  app.locals.connections = connection.service;
+  app.get("/auth/:id/callback", connection.callback);
+  app.get("/auth/:id/start", connection.start);
   app.use("/api", (req, res, next) => {
     auth.require(req);
     next();
   });
-  app.post('/api/auth/logout',(req,res)=>{auth.logout(req,res);res.json({ok:true});});
-  app.use('/api',connection.router);
+  app.post("/api/auth/logout", (req, res) => {
+    auth.logout(req, res);
+    res.json({ ok: true });
+  });
+  app.use("/api", connection.router);
   app.get("/api/state", (_req, res) => {
     const state: State = {
       settings: store.settings(),
@@ -339,19 +362,17 @@ export function createApp(store: Store, provider = new PostizProvider()) {
       .parse(req.body);
     store.require("projects", input.projectId);
     projectAssets(input.assetIds);
-    res
-      .status(201)
-      .json(
-        store.put<Post>("posts", {
-          ...input,
-          id: randomUUID(),
-          version: 1,
-          status: "draft",
-          approvedHash: null,
-          createdAt: now(),
-          updatedAt: now(),
-        }),
-      );
+    res.status(201).json(
+      store.put<Post>("posts", {
+        ...input,
+        id: randomUUID(),
+        version: 1,
+        status: "draft",
+        approvedHash: null,
+        createdAt: now(),
+        updatedAt: now(),
+      }),
+    );
   });
   app.put("/api/posts/:id", (req, res) => {
     const input = z
@@ -417,6 +438,15 @@ export function createApp(store: Store, provider = new PostizProvider()) {
           : null,
     });
     store.audit("job.reconciled", job.id, result.status);
+    if (result.status === "published") {
+      for (const linked of store
+        .all<import("../shared/connectors.ts").ConnectionRecord>("connections")
+        .filter((c) => c.remoteIds.includes(job.accountId)))
+        store.put("connections", {
+          ...linked,
+          lastPublished: result.publishedAt,
+        });
+    }
     res.json(result);
   });
   app.post("/api/accounts/sync", async (_req, res) => {
@@ -456,6 +486,9 @@ export function createApp(store: Store, provider = new PostizProvider()) {
     );
     res.json({
       exportedAt: now(),
+      connections: store.all("connections"),
+      notifications: store.all("notifications"),
+      assistedWorkflows: store.all("assisted_workflows"),
       settings: store.settings(),
       projects: store.all("projects"),
       posts: store.all("posts"),
@@ -545,13 +578,11 @@ export const errorHandler: express.ErrorRequestHandler = (
   _next,
 ) => {
   if (error instanceof z.ZodError)
-    return void res
-      .status(400)
-      .json({
-        error: error.issues
-          .map((i) => `${i.path.join(".")}: ${i.message}`)
-          .join("; "),
-      });
+    return void res.status(400).json({
+      error: error.issues
+        .map((i) => `${i.path.join(".")}: ${i.message}`)
+        .join("; "),
+    });
   const status =
     error instanceof HttpError
       ? error.status

@@ -4,5 +4,5 @@
   "channel": "chromium",
   "brokerPort": 4312,
   "downloadLimitMB": 250,
-  "notes": "Only this project's browser/profile directory is used. Personal profiles are never imported. The broker is the only profile writer."
+  "notes": "Runtime profile and downloads live in a dedicated per-user LocalAppData/FreelanceGrowth/Browser project directory with owner-only ACLs. Personal profiles are never imported. The broker is the only profile writer."
 }

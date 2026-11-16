@@ -383,6 +383,84 @@ test("pause during provider preparation prevents submission", async () => {
     store.close();
   }
 });
+test("temporary known-safe provider rejection uses bounded retries without creating duplicate jobs", async () => {
+  const { store, post } = fixture();
+  approve(store, post.id);
+  const job = schedule(store, post.id, "account-1", future());
+  class Limited extends PostizProvider {
+    override async accounts() {
+      return [
+        {
+          id: "account-1",
+          name: "Fixture",
+          platform: "linkedin",
+          disabled: false,
+          syncedAt: now(),
+        },
+      ];
+    }
+    override async publish(): Promise<string> {
+      throw new ProviderError("Rate limited", false, true);
+    }
+  }
+  const old = config.publishingEnabled;
+  config.publishingEnabled = true;
+  store.put("settings", {
+    id: "owner",
+    ...settingsSchema.parse({ paused: false }),
+  });
+  try {
+    const worker = new Worker(store, new Limited());
+    await worker.publish(job);
+    let next = store.require<Job>("jobs", job.id);
+    assert.equal(next.status, "scheduled");
+    assert(next.nextAttemptAt);
+    assert.equal(next.attempts, 1);
+    await worker.publish(next);
+    next = store.require<Job>("jobs", job.id);
+    await worker.publish(next);
+    next = store.require<Job>("jobs", job.id);
+    assert.equal(next.status, "failed");
+    assert.equal(next.attempts, 3);
+    assert.equal(store.all("jobs").length, 1);
+  } finally {
+    config.publishingEnabled = old;
+    store.close();
+  }
+});
+test("emergency stop prevents new automated work and rejects a running generation result", async () => {
+  const { store, project } = fixture();
+  const generation: Generation = {
+    id: randomUUID(),
+    projectId: project.id,
+    platforms: ["linkedin"],
+    status: "queued",
+    error: null,
+    createdAt: now(),
+  };
+  store.put("generations", generation);
+  const worker = new Worker(store, new PostizProvider(), async () => {
+    store.put("runtime", { id: "emergency-stop", active: true });
+    return {
+      posts: [
+        {
+          platform: "linkedin",
+          title: "Emergency fixture",
+          content: "This result must not be saved.",
+        },
+      ],
+    };
+  });
+  await worker.content(generation);
+  assert.equal(store.all("posts").length, 1);
+  assert.equal(
+    store.require<Generation>("generations", generation.id).status,
+    "failed",
+  );
+  await worker.tick();
+  assert.equal(store.all("posts").length, 1);
+  store.close();
+});
 test("provider payload uses documented Postiz contract and keeps submitted distinct from published", async () => {
   const { store, post } = fixture();
   approve(store, post.id);
@@ -436,14 +514,31 @@ test("HTTP API blocks unauthenticated, forged-host and cross-origin access; enqu
       },
     );
     assert.equal(forgedHostStatus, 403);
-    const r = await fetch(base + "/api/session");
+    const r = await fetch(base + "/api/auth/setup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "local-test-password-only" }),
+    });
     const { csrf } = (await r.json()) as any;
     const headers = {
       "Content-Type": "application/json",
       "x-csrf-token": csrf,
-      Cookie: `cf_session=${csrf}`,
+      Cookie: r.headers.get("set-cookie")!.split(";")[0],
     };
     assert.equal((await fetch(base + "/api/state", { headers })).status, 200);
+    const exportData = (await (
+      await fetch(base + "/api/export", { headers })
+    ).json()) as any;
+    assert.equal(exportData.vault, undefined);
+    assert.equal(exportData.auth_owner, undefined);
+    assert.equal(exportData.owner_sessions, undefined);
+    const unreviewed = store.all<Post>("posts")[0];
+    const prepare = await fetch(base + "/api/connections/reddit/prepare", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ postId: unreviewed.id }),
+    });
+    assert.equal(prepare.status, 400);
     assert.equal(
       (
         await fetch(base + "/api/projects", {

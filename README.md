@@ -1,5 +1,7 @@
 # ClientForge
 
+The dedicated FreelanceGrowth Browser and connection manager are now available at [http://localhost:3000/connections](http://localhost:3000/connections). Use the **FreelanceGrowth Browser** desktop shortcut. See [the browser and account connection guide](docs/browser-connections.md) for verified features, profile location, credentials setup and the remaining phases.
+
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-19.1-61dafb.svg)](https://react.dev/)
 [![Express](https://img.shields.io/badge/Express-5.1-black.svg)](https://expressjs.com/)
@@ -165,7 +167,7 @@ Copy-Item .env.example .env
 Edit `.env` to set your desired port and configuration:
 
 ```ini
-PORT=4310
+PORT=3000
 DATA_DIR=data
 AGY_PATH=agy
 POSTIZ_URL=http://localhost:4007/api/public/v1
@@ -206,7 +208,8 @@ npm run dev
 
 ### 4. Open the Applications
 
-- **Dashboard**: [http://127.0.0.1:4310](http://127.0.0.1:4310) (also listens on legacy port 3000 if default).
+- **Dashboard**: [http://localhost:3000](http://localhost:3000). Port 4310 remains a compatibility alias when the configured port is 3000.
+- **Connections**: [http://localhost:3000/connections](http://localhost:3000/connections). Create your own local owner password on first use.
 - **Public Portfolio Preview**: [http://127.0.0.1:4310/portfolio](http://127.0.0.1:4310/portfolio)
 - **Self-Hosted Postiz Console**: [http://localhost:4007](http://localhost:4007)
 
@@ -298,7 +301,7 @@ ClientForge adheres to a defense-in-depth security model:
 
 ### 1. Network Boundary
 - The Express server strictly binds to `127.0.0.1`. It does not accept remote network traffic.
-- Postiz compose configuration explicitly binds internal ports (`4007`, `5432`, `6379`) to `127.0.0.1`.
+- Postiz web port `4007` binds to `127.0.0.1`; its database and Redis ports are not published to the host.
 
 ### 2. Antigravity Sandbox Policy
 The Antigravity CLI process is restricted using explicit session permissions:
@@ -321,7 +324,7 @@ The Antigravity CLI process is restricted using explicit session permissions:
 All project and profile inputs are treated as untrusted text strings inside the prompt, and publishing credentials (`POSTIZ_API_KEY`, OAuth tokens) are scrubbed from the subprocess environment.
 
 ### 3. Local Credential Vault
-- **Windows**: Keys are encrypted using the Windows Data Protection API (DPAPI) and stored on disk with restrictive Access Control Lists (`Set-Acl` granting access only to the current user SID and System).
+- **Windows**: Keys are encrypted using the Windows Data Protection API (DPAPI). .NET access-control APIs grant access only to the current user SID and SYSTEM; no execution policy changes or elevation are required.
 - **At Rest**: Individual tokens are encrypted with `AES-256-GCM` using authenticated additional data (AAD).
 
 ### 4. Owner Authentication & CSRF Protection
@@ -334,7 +337,7 @@ All project and profile inputs are treated as untrusted text strings inside the 
 
 ## Data Storage, Backup & Disaster Recovery
 
-All state is preserved inside the `.gitignore`-protected `data/` directory:
+Application records live in ignored `data/`. The dedicated browser profile, downloads, screenshots and broker logs live separately in the protected per-user `%LOCALAPPDATA%/FreelanceGrowth/Browser/<project-id>/` directory. No personal Chrome profile is imported.
 
 ```text
 data/
@@ -342,7 +345,7 @@ data/
 ├── clientforge.sqlite-wal     # Write-Ahead Log
 ├── clientforge.sqlite-shm     # Shared memory index
 ├── uploads/                   # Media attachments (PNG, JPEG, WebP, MP4)
-├── vault/                     # Encrypted credential storage
+├── security/                  # Legacy key location; migrated to protected per-user AppData
 ├── postiz/                    # Docker Compose configuration and state
 └── logs/                      # Server and worker logs
 ```
@@ -385,7 +388,7 @@ clientforge/
 ├── tsconfig.json            # Strict TypeScript configuration
 ├── vite.config.ts           # Vite bundler configuration
 │
-├── browser/                 # Browser broker configuration and runtime state
+├── browser/                 # Browser configuration; runtime profile is in protected per-user AppData
 ├── docs/                    # Architecture diagrams and UI screenshots
 │   └── dashboard.jpg        # Studio dashboard preview
 │

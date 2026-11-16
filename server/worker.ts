@@ -13,6 +13,8 @@ import { nextRuleRun } from "../shared/time.ts";
 import { generate } from "./antigravity.ts";
 import { PostizProvider, ProviderError } from "./postiz.ts";
 import { config, safeError } from "./config.ts";
+import { notify } from "./connections.ts";
+import { connectors, type ConnectionRecord } from "../shared/connectors.ts";
 
 export class Worker {
   busy = false;
@@ -35,6 +37,10 @@ export class Worker {
   }
   async tick() {
     if (this.busy) return;
+    if (
+      this.store.get<{ active: boolean }>("runtime", "emergency-stop")?.active
+    )
+      return;
     this.busy = true;
     try {
       this.materializeCadence();
@@ -42,11 +48,55 @@ export class Worker {
       if (config.publishingEnabled && !this.store.settings().paused) {
         const job = this.store
           .all<Job>("jobs")
-          .filter((j) => j.status === "scheduled" && j.scheduledAt <= now())
+          .filter(
+            (j) =>
+              j.status === "scheduled" &&
+              j.scheduledAt <= now() &&
+              (!j.nextAttemptAt || j.nextAttemptAt <= now()),
+          )
           .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))[0];
         if (job) {
           await this.publish(job);
           return;
+        }
+      }
+      const poll = this.store.get<{ id: string; at: number }>(
+        "runtime",
+        "provider-poll",
+      );
+      const pending = this.store
+        .all<Job>("jobs")
+        .find((j) => j.status === "submitted");
+      if (pending && (!poll || Date.now() - poll.at > 300000)) {
+        this.store.put("runtime", { id: "provider-poll", at: Date.now() });
+        try {
+          const result = await this.provider.reconcile(pending);
+          this.store.put("jobs", { ...pending, ...result });
+          if (result.status === "published") {
+            for (const connection of this.store
+              .all<ConnectionRecord>("connections")
+              .filter((c) => c.remoteIds.includes(pending.accountId)))
+              this.store.put("connections", {
+                ...connection,
+                lastPublished: result.publishedAt,
+              });
+            notify(
+              this.store,
+              "publishing",
+              "Publication confirmed",
+              pending.snapshot.title,
+              pending.id,
+            );
+          } else if (result.status === "failed")
+            notify(
+              this.store,
+              "publishing",
+              "Publication failed",
+              "The provider reported a failure. Review the job in Postiz.",
+              pending.id,
+            );
+        } catch {
+          /* A read-only check can be retried later without resubmission. */
         }
       }
       const generation = this.store
@@ -59,6 +109,10 @@ export class Worker {
     }
   }
   materializeCadence(at = new Date()) {
+    if (
+      this.store.get<{ active: boolean }>("runtime", "emergency-stop")?.active
+    )
+      return;
     if (
       this.store
         .all<Generation>("generations")
@@ -129,6 +183,13 @@ export class Worker {
       );
       this.store.transaction(() => {
         const latest = this.store.require<Project>("projects", project.id);
+        if (
+          this.store.get<{ active: boolean }>("runtime", "emergency-stop")
+            ?.active
+        )
+          throw new Error(
+            "Generation stopped by the emergency control. No drafts were saved.",
+          );
         if (!latest.permission || latest.updatedAt !== project.updatedAt)
           throw new Error(
             "Project evidence or permission changed during generation. Generate again using the updated project.",
@@ -178,6 +239,38 @@ export class Worker {
   }
   async publish(job: Job) {
     try {
+      const connector = connectors.find((c) =>
+        c.providerIds.includes(job.snapshot.platform),
+      );
+      const connection = connector
+        ? this.store.get<ConnectionRecord>("connections", connector.id)
+        : undefined;
+      if (
+        connection &&
+        (connection.disabled ||
+          connection.mode === "manual" ||
+          connection.status !== "Connected")
+      )
+        throw new Error(
+          "This connection is disabled, manual-only or needs a successful authentication check.",
+        );
+      if (connector) {
+        const since = Date.now() - 86400000;
+        const recent = this.store
+          .all<Job>("jobs")
+          .filter(
+            (j) =>
+              connector.providerIds.includes(j.snapshot.platform) &&
+              ["publishing", "submitted", "published", "unknown"].includes(
+                j.status,
+              ) &&
+              Date.parse(j.lastAttemptAt || j.createdAt) > since,
+          );
+        if (recent.length >= connector.dailyLimit)
+          throw new Error(
+            "The configured platform publishing limit has been reached. Review the next posting time.",
+          );
+      }
       const current = this.store.require<Post>("posts", job.postId);
       const errors = validatePost(this.store, current, true);
       if (hashPost(current) !== hashPost(job.snapshot))
@@ -203,11 +296,23 @@ export class Worker {
       const latest = this.store.require<Job>("jobs", job.id);
       if (
         latest.status !== "scheduled" ||
+        this.store.get<{ active: boolean }>("runtime", "emergency-stop")
+          ?.active ||
         this.store.settings().paused ||
         !config.publishingEnabled
       )
         return;
       const newest = this.store.require<Post>("posts", job.postId);
+      const currentConnection = connector
+        ? this.store.get<ConnectionRecord>("connections", connector.id)
+        : undefined;
+      if (
+        currentConnection &&
+        (currentConnection.disabled ||
+          currentConnection.mode === "manual" ||
+          currentConnection.status !== "Connected")
+      )
+        throw new Error("Connection permission changed during preparation.");
       if (
         hashPost(newest) !== hashPost(job.snapshot) ||
         validatePost(this.store, newest, true).length
@@ -218,6 +323,7 @@ export class Worker {
       const active: Job = {
         ...job,
         status: "publishing",
+        lastAttemptAt: now(),
         attempts: job.attempts + 1,
       };
       this.store.put("jobs", active);
@@ -228,16 +334,53 @@ export class Worker {
         job.id,
         `Postiz accepted ${remoteId}; publication is not yet confirmed.`,
       );
+      notify(
+        this.store,
+        "publishing",
+        "Post submitted",
+        `${job.snapshot.title} was accepted by Postiz. Publication confirmation is pending.`,
+        job.id,
+      );
     } catch (e) {
       const latest = this.store.require<Job>("jobs", job.id);
       if (latest.status === "cancelled") return;
+      const attempts =
+        latest.status === "publishing" ? latest.attempts : job.attempts + 1;
+      const retry =
+        e instanceof ProviderError &&
+        e.retryable &&
+        !e.uncertain &&
+        attempts < 3;
       this.store.put("jobs", {
         ...latest,
+        attempts,
         status:
-          e instanceof ProviderError && e.uncertain ? "unknown" : "failed",
+          e instanceof ProviderError && e.uncertain
+            ? "unknown"
+            : retry
+              ? "scheduled"
+              : "failed",
+        nextAttemptAt: retry
+          ? new Date(
+              Date.now() +
+                Math.max(
+                  30000 * 2 ** attempts,
+                  e instanceof ProviderError ? e.retryAfterMs || 0 : 0,
+                ),
+            ).toISOString()
+          : undefined,
         error: safeError(e),
       });
       this.store.audit("job.failed", job.id, safeError(e));
+      notify(
+        this.store,
+        "publishing",
+        retry
+          ? "Temporary publishing failure; retry scheduled"
+          : "Publishing needs attention",
+        safeError(e),
+        job.id,
+      );
     }
   }
 }
