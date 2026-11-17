@@ -2009,7 +2009,7 @@ function ScheduleForm({
   const accounts = state.accounts.filter(
     (a) => a.platform === post.platform && !a.disabled,
   );
-  const [accountId, setAccountId] = useState(accounts[0]?.id || "");
+  const [accountId, setAccountId] = useState(accounts.find(a => a.isDefault)?.id || accounts[0]?.id || "");
   const [time, setTime] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);

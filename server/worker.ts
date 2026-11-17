@@ -13,6 +13,7 @@ import { nextRuleRun } from "../shared/time.ts";
 import { generate } from "./antigravity.ts";
 import { PostizProvider, ProviderError } from "./postiz.ts";
 import { config, safeError } from "./config.ts";
+import { assertAccountAllowed, policyFor } from "./account-policies.ts";
 import { notify } from "./connections.ts";
 import { connectors, type ConnectionRecord } from "../shared/connectors.ts";
 
@@ -239,6 +240,12 @@ export class Worker {
   }
   async publish(job: Job) {
     try {
+      assertAccountAllowed(this.store, job.accountId);
+      const policy = policyFor(this.store, job.accountId);
+      const count = this.store.all<Job>("jobs").filter(j => j.accountId === job.accountId &&
+        ["publishing", "submitted", "published", "unknown"].includes(j.status) &&
+        Date.parse(j.lastAttemptAt || j.createdAt) > Date.now() - 86400000).length;
+      if (count >= policy.dailyLimit) throw new Error("Account daily publishing limit reached.");
       const connector = connectors.find((c) =>
         c.providerIds.includes(job.snapshot.platform),
       );
@@ -303,6 +310,7 @@ export class Worker {
       )
         return;
       const newest = this.store.require<Post>("posts", job.postId);
+      assertAccountAllowed(this.store, job.accountId);
       const currentConnection = connector
         ? this.store.get<ConnectionRecord>("connections", connector.id)
         : undefined;

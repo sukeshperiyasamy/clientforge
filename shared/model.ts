@@ -207,6 +207,7 @@ export type Asset = {
   createdAt: string;
 };
 export type Account = {
+  isDefault?: boolean;
   id: string;
   name: string;
   platform: string;

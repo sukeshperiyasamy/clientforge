@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { AccountConnections } from "./AccountConnections";
 import {
   Globe2,
   ExternalLink,
@@ -117,6 +118,7 @@ export function ConnectionsPage({ posts = [] }: { posts?: Post[] }) {
   const unread = data.notifications.filter((n) => !n.read);
   return (
     <>
+      <AccountConnections />
       <div className="connection-safety">
         <span>
           <ShieldCheck size={15} />

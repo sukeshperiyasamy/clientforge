@@ -13,6 +13,7 @@ import {
 } from "../server/domain.ts";
 import { createApp, errorHandler } from "../server/app.ts";
 import { Worker } from "../server/worker.ts";
+import { updateAccountPolicy } from "../server/account-policies.ts";
 import { PostizProvider, ProviderError } from "../server/postiz.ts";
 import { config } from "../server/config.ts";
 import {
@@ -65,6 +66,28 @@ function fixture() {
   return { store, project, post };
 }
 const future = () => new Date(Date.now() + 3600000).toISOString();
+test("per-account disable during network preparation prevents publication", async () => {
+  const { store, post } = fixture();
+  approve(store, post.id);
+  const job = schedule(store, post.id, "account-1", future());
+  let submissions = 0;
+  class Fake extends PostizProvider {
+    override async accounts() {
+      updateAccountPolicy(store, "account-1", { disabled: true });
+      return [{ id: "account-1", name: "Test", platform: "linkedin", disabled: false, syncedAt: now() }];
+    }
+    override async publish() { submissions++; return "never"; }
+  }
+  const previous = config.publishingEnabled;
+  config.publishingEnabled = true;
+  store.put("settings", { id: "owner", ...settingsSchema.parse({ paused: false }) });
+  try {
+    await new Worker(store, new Fake()).publish(job);
+    assert.equal(submissions, 0);
+    assert.equal(store.require<Job>("jobs", job.id).status, "cancelled");
+    assert.throws(() => schedule(store, post.id, "account-1", future()), /disabled/);
+  } finally { config.publishingEnabled = previous; store.close(); }
+});
 test("unapproved versions cannot be scheduled", () => {
   const { store, post } = fixture();
   assert.throws(

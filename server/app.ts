@@ -30,6 +30,7 @@ import {
 import { nextRuleRun } from "../shared/time.ts";
 import { OwnerAuth } from "./security.ts";
 import { connectionRoutes } from "./connection-routes.ts";
+import { accountViews, updateAccountPolicy, syncProviderAccounts } from "./account-policies.ts";
 
 export function createApp(store: Store, provider = new PostizProvider()) {
   const app = express();
@@ -112,7 +113,8 @@ export function createApp(store: Store, provider = new PostizProvider()) {
       generations: store.all("generations"),
       rules: store.all("rules"),
       leads: store.all("leads"),
-      accounts: store.all("accounts"),
+      accounts: accountViews(store).map(a => ({ ...a, isDefault: a.policy.isDefault,
+        disabled: a.disabled || a.policy.disabled || !a.policy.publishingEnabled || a.policy.mode === "manual" })),
       assets: store.all("assets"),
       audit: store.all<Audit>("audit").slice(0, 100),
       platforms,
@@ -451,13 +453,18 @@ export function createApp(store: Store, provider = new PostizProvider()) {
   });
   app.post("/api/accounts/sync", async (_req, res) => {
     const accounts = await provider.accounts();
-    store.transaction(() => {
-      for (const old of store.all<Account>("accounts"))
-        store.put("accounts", { ...old, disabled: true });
-      for (const account of accounts) store.put("accounts", account);
-    });
-    store.audit("accounts.synced", "", `${accounts.length} accounts`);
+    syncProviderAccounts(store, accounts);
     res.json(accounts);
+  });
+  app.get("/api/account-connections", (_req, res) => res.json(accountViews(store)));
+  app.put("/api/account-connections/:id", (req, res) => {
+    res.json(updateAccountPolicy(store, req.params.id, req.body));
+  });
+  app.post("/api/account-connections/:id/test", async (req, res) => {
+    store.require<Account>("accounts", req.params.id);
+    const accounts = await provider.accounts();
+    syncProviderAccounts(store, accounts);
+    res.json(accountViews(store).find(a => a.id === req.params.id));
   });
   app.post("/api/leads", (req, res) => {
     const lead = store.put<Lead>("leads", {

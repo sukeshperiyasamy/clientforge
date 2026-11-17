@@ -8,6 +8,7 @@ import {
   type Asset,
 } from "../shared/model.ts";
 import { Store, HttpError } from "./store.ts";
+import { assertAccountAllowed } from "./account-policies.ts";
 
 export const now = () => new Date().toISOString();
 export const hashPost = (post: Post) =>
@@ -137,6 +138,7 @@ export function schedule(
   return store.transaction(() => {
     const post = store.require<Post>("posts", postId);
     const account = store.require<Account>("accounts", accountId);
+    assertAccountAllowed(store, accountId);
     const errors = validatePost(store, post, true);
     if (account.disabled || account.platform !== post.platform)
       errors.push("Select an active account for this platform.");

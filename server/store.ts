@@ -17,6 +17,16 @@ export class Store {
       PRAGMA user_version=1;`);
     if (!this.get("settings", "owner"))
       this.put("settings", { id: "owner", ...settingsSchema.parse({}) });
+    // Additive migration; existing account IDs, jobs and tokens are unchanged.
+    if (!this.get("migrations", "account-policies-v1")) this.transaction(() => {
+      for (const account of this.all<{ id: string }>("accounts")) {
+        if (!this.get("account_policies", account.id)) this.put("account_policies", {
+          id: account.id, workspace: "Owner", timezone: "UTC", disabled: false,
+          publishingEnabled: true, mode: "approval", dailyLimit: 5, isDefault: false,
+        });
+      }
+      this.put("migrations", { id: "account-policies-v1", appliedAt: new Date().toISOString() });
+    });
   }
   all<T>(kind: string): T[] {
     return (
