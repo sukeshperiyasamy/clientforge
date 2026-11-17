@@ -1,5 +1,9 @@
 # ClientForge
 
+The next-stage account and acquisition features are implemented locally. See [the implementation and verification record](docs/next-stage-implementation.md) for exact capabilities and remaining production blockers. New features include independent native account slots, multiple encrypted Postiz workspaces, campaign account assignments, opportunity imports, editable Antigravity proposal drafts and follow-up reminders at `/acquisition`.
+
+Run `npm run start:public` for the separate portfolio server at **http://localhost:3001**. It exposes service pages and inquiry capture without administration routes. The dashboard stays loopback-only on port 3000. Docker/HTTPS configurations in `deployment/` are preparation only; no public deployment or authenticated social publication has been performed. Campaign recurrence preferences and heuristic opportunity scores have the limits described in the implementation record.
+
 The dedicated FreelanceGrowth Browser and connection manager are now available at [http://localhost:3000/connections](http://localhost:3000/connections). Use the **FreelanceGrowth Browser** desktop shortcut. See [the browser and account connection guide](docs/browser-connections.md) for verified features, profile location, credentials setup and the remaining phases.
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)

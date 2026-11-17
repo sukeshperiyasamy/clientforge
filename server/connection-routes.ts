@@ -28,6 +28,7 @@ export function connectionRoutes(store: Store, auth: OwnerAuth) {
     const s = connections();
     res.json({
       connectors: s.views(),
+      slots: s.slots(),
       browser: await s.browser.status(),
       notifications: store.all<Notification>("notifications").slice(0, 100),
       emergency:
@@ -35,6 +36,14 @@ export function connectionRoutes(store: Store, auth: OwnerAuth) {
         false,
       origin: "http://localhost:3000",
     });
+  });
+  router.post("/connection-slots", (req, res) => {
+    const input = z.object({ platform: z.enum(["github", "youtube", "buffer"]), label: z.string().trim().min(1).max(100) }).parse(req.body);
+    res.status(201).json(connections().add(input.platform, input.label));
+  });
+  router.post("/connection-slots/:id/key", async (req, res) => {
+    const { key } = z.object({ key: z.string().trim().min(10).max(4096) }).parse(req.body);
+    res.json(await connections().setBufferKey(key, req.params.id));
   });
   router.post("/connections/:id/connect", async (req, res) => {
     const owner = auth.require(req);
@@ -47,7 +56,7 @@ export function connectionRoutes(store: Store, auth: OwnerAuth) {
     );
   });
   router.post("/connections/:id/open", async (req, res) => {
-    const c = getConnector(req.params.id);
+    const c = connections().connector(req.params.id);
     if (!c) throw new HttpError(404, "Connector not found.");
     res.json(await connections().browser.open(c.url));
   });

@@ -25,7 +25,7 @@ if (process.argv.includes("--production")) {
   app.use(vite.middlewares);
 }
 app.use(errorHandler);
-const worker = new Worker(store);
+const worker = new Worker(store, undefined, undefined, app.locals.providerForJob);
 let checkingConnections = false;
 const connectionTimer = setInterval(async () => {
   if (checkingConnections) return;

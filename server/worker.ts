@@ -24,6 +24,7 @@ export class Worker {
     public store: Store,
     public provider = new PostizProvider(),
     public generator = generate,
+    public providerForJob: (job: Job) => PostizProvider = () => provider,
   ) {}
   start() {
     recover(this.store);
@@ -44,6 +45,10 @@ export class Worker {
       return;
     this.busy = true;
     try {
+      for (const reminder of this.store.all<{id:string;leadId:string;dueAt:string;status:string}>("reminders").filter(r=>r.status==="pending" && r.dueAt<=now())) {
+        notify(this.store,"system","Client follow-up due","Review the lead and its proposal before contacting the client.",reminder.leadId);
+        this.store.put("reminders",{...reminder,status:"notified"});
+      }
       this.materializeCadence();
       // Due publishing jobs take priority over generating additional drafts.
       if (config.publishingEnabled && !this.store.settings().paused) {
@@ -71,7 +76,7 @@ export class Worker {
       if (pending && (!poll || Date.now() - poll.at > 300000)) {
         this.store.put("runtime", { id: "provider-poll", at: Date.now() });
         try {
-          const result = await this.provider.reconcile(pending);
+          const result = await this.providerForJob(pending).reconcile(pending);
           this.store.put("jobs", { ...pending, ...result });
           if (result.status === "published") {
             for (const connection of this.store
@@ -240,6 +245,7 @@ export class Worker {
   }
   async publish(job: Job) {
     try {
+      const provider = this.providerForJob(job);
       assertAccountAllowed(this.store, job.accountId);
       const policy = policyFor(this.store, job.accountId);
       const count = this.store.all<Job>("jobs").filter(j => j.accountId === job.accountId &&
@@ -249,7 +255,7 @@ export class Worker {
       const connector = connectors.find((c) =>
         c.providerIds.includes(job.snapshot.platform),
       );
-      const connection = connector
+      const connection = connector && !job.workspaceId
         ? this.store.get<ConnectionRecord>("connections", connector.id)
         : undefined;
       if (
@@ -284,7 +290,7 @@ export class Worker {
         errors.push("The approved content changed.");
       if (errors.length) throw new Error(errors.join(" "));
       // Live account check prevents publishing against stale or disabled connections.
-      const account = (await this.provider.accounts()).find(
+      const account = (await provider.accounts()).find(
         (a) =>
           a.id === job.accountId &&
           !a.disabled &&
@@ -297,7 +303,7 @@ export class Worker {
       const media = [];
       for (const id of job.snapshot.assetIds)
         media.push(
-          await this.provider.upload(this.store.require<Asset>("assets", id)),
+          await provider.upload(this.store.require<Asset>("assets", id)),
         );
       // Re-read immediately before the side effect after network awaits.
       const latest = this.store.require<Job>("jobs", job.id);
@@ -311,7 +317,7 @@ export class Worker {
         return;
       const newest = this.store.require<Post>("posts", job.postId);
       assertAccountAllowed(this.store, job.accountId);
-      const currentConnection = connector
+      const currentConnection = connector && !job.workspaceId
         ? this.store.get<ConnectionRecord>("connections", connector.id)
         : undefined;
       if (
@@ -335,7 +341,7 @@ export class Worker {
         attempts: job.attempts + 1,
       };
       this.store.put("jobs", active);
-      const remoteId = await this.provider.publish(active, media);
+      const remoteId = await this.providerForJob(active).publish(active, media);
       this.store.put("jobs", { ...active, status: "submitted", remoteId });
       this.store.audit(
         "job.submitted",

@@ -1,0 +1,33 @@
+# Prepare only. Start on an approved VPS after reviewing domain, privacy and backups.
+services:
+  portfolio:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.public
+    environment:
+      PUBLIC_ORIGIN: https://${PORTFOLIO_DOMAIN:?Set approved domain}
+      DATA_DIR: /app/data
+      PUBLIC_TRUST_PROXY: uniquelocal
+    volumes:
+      - portfolio-data:/app/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+  caddy:
+    image: caddy:2-alpine
+    ports: ["80:80", "443:443"]
+    environment:
+      PORTFOLIO_DOMAIN: ${PORTFOLIO_DOMAIN:?Set approved domain}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+volumes:
+  portfolio-data:
+  caddy-data:
+  caddy-config:

@@ -43,9 +43,14 @@ export function updateAccountPolicy(store: Store, id: string, input: unknown) {
     return saved;
   });
 }
-export function syncProviderAccounts(store: Store, accounts: Account[]) {
+export function syncProviderAccounts(store: Store, accounts: Account[], workspaceId?: string) {
   store.transaction(() => {
-    for (const old of store.all<Account>("accounts")) store.put("accounts", { ...old, disabled: true });
+    for (const account of accounts) {
+      const existing = store.get<Account>("accounts", account.id);
+      if (account.workspaceId !== workspaceId || (existing && existing.workspaceId !== workspaceId))
+        throw new HttpError(409, "Provider account identity collides with another workspace.");
+    }
+    for (const old of store.all<Account>("accounts").filter(a => a.workspaceId === workspaceId)) store.put("accounts", { ...old, disabled: true });
     for (const account of accounts) store.put("accounts", account);
     store.audit("accounts.synced", "", `${accounts.length} provider accounts`);
   });

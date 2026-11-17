@@ -1,0 +1,3 @@
+{$PORTFOLIO_DOMAIN} {
+    reverse_proxy portfolio:3001
+}

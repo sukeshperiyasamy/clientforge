@@ -165,6 +165,7 @@ export function schedule(
       id: randomUUID(),
       postId,
       accountId,
+      workspaceId: account.workspaceId,
       scheduledAt: new Date(timestamp).toISOString(),
       status: "scheduled",
       snapshot: post,

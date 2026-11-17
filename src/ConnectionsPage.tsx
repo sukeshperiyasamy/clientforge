@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { AccountConnections } from "./AccountConnections";
+import { IntegrationAccounts } from "./IntegrationAccounts";
 import {
   Globe2,
   ExternalLink,
@@ -119,6 +120,7 @@ export function ConnectionsPage({ posts = [] }: { posts?: Post[] }) {
   return (
     <>
       <AccountConnections />
+      <IntegrationAccounts />
       <div className="connection-safety">
         <span>
           <ShieldCheck size={15} />

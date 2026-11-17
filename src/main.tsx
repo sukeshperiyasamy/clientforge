@@ -57,8 +57,10 @@ import { zonedToIso } from "../shared/time";
 import "./style.css";
 import { ConnectionsPage } from "./ConnectionsPage";
 import { AuthGate } from "./AuthGate";
+import { AcquisitionPage } from "./AcquisitionPage";
 
 const nav = [
+  { id: "acquisition", label: "Client acquisition", icon: BriefcaseBusiness },
   { id: "overview", label: "Overview", icon: BarChart3 },
   { id: "projects", label: "Project library", icon: FolderOpen },
   { id: "studio", label: "Content studio", icon: WandSparkles },
@@ -203,7 +205,7 @@ type Run = (task: () => Promise<unknown>, message?: string) => Promise<void>;
 function App() {
   const [state, setState] = useState<State>();
   const [page, setPage] = useState(
-    location.pathname === "/connections" ? "connections" : "overview",
+    location.pathname === "/connections" ? "connections" : location.pathname === "/acquisition" ? "acquisition" : "overview",
   );
   const [notice, setNotice] = useState<{ message: string; error: boolean }>();
   const [busy, setBusy] = useState(false);
@@ -1227,6 +1229,7 @@ function App() {
               )}
             </>
           )}
+          {page === "acquisition" && <AcquisitionPage state={state} />}
           {page === "connections" && <ConnectionsPage posts={state.posts} />}
           {page === "channels" && (
             <>

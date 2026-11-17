@@ -31,6 +31,8 @@ import { nextRuleRun } from "../shared/time.ts";
 import { OwnerAuth } from "./security.ts";
 import { connectionRoutes } from "./connection-routes.ts";
 import { accountViews, updateAccountPolicy, syncProviderAccounts } from "./account-policies.ts";
+import { Workspaces } from "./workspaces.ts";
+import { acquisitionRoutes } from "./acquisition-routes.ts";
 
 export function createApp(store: Store, provider = new PostizProvider()) {
   const app = express();
@@ -93,6 +95,8 @@ export function createApp(store: Store, provider = new PostizProvider()) {
   });
   const connection = connectionRoutes(store, auth);
   app.locals.connections = connection.service;
+  const workspaces = () => new Workspaces(store, connection.service().vault, provider);
+  app.locals.providerForJob = (job: Job) => workspaces().forJob(job);
   app.get("/auth/:id/callback", connection.callback);
   app.get("/auth/:id/start", connection.start);
   app.use("/api", (req, res, next) => {
@@ -104,6 +108,7 @@ export function createApp(store: Store, provider = new PostizProvider()) {
     res.json({ ok: true });
   });
   app.use("/api", connection.router);
+  app.use("/api", acquisitionRoutes(store));
   app.get("/api/state", (_req, res) => {
     const state: State = {
       settings: store.settings(),
@@ -176,6 +181,8 @@ export function createApp(store: Store, provider = new PostizProvider()) {
         .all<Post>("posts")
         .filter((p) => p.projectId === previous.id))
         editPost(store, post.id, post.content, post.title, post.assetIds);
+      for (const proposal of store.all<import("../shared/acquisition.ts").Proposal>("proposals").filter(p=>p.projectIds.includes(previous.id)))
+        store.put("proposals",{...proposal,approvedHash:null,updatedAt:now()});
       return updated;
     });
     store.audit(
@@ -430,7 +437,7 @@ export function createApp(store: Store, provider = new PostizProvider()) {
     const job = store.require<Job>("jobs", req.params.id);
     if (!["unknown", "submitted"].includes(job.status))
       throw new HttpError(400, "This job does not need remote reconciliation.");
-    const result = await provider.reconcile(job);
+    const result = await workspaces().forJob(job).reconcile(job);
     store.put("jobs", {
       ...job,
       ...result,
@@ -457,13 +464,20 @@ export function createApp(store: Store, provider = new PostizProvider()) {
     res.json(accounts);
   });
   app.get("/api/account-connections", (_req, res) => res.json(accountViews(store)));
+  app.get("/api/publishing-workspaces", (_req, res) => res.json(workspaces().list()));
+  app.post("/api/publishing-workspaces", (req, res) => res.status(201).json(workspaces().add(req.body)));
+  app.put("/api/publishing-workspaces/:id", (req,res)=>{
+    const {disabled}=z.object({disabled:z.boolean(),confirm:z.literal(true)}).parse(req.body);
+    res.json(workspaces().disable(req.params.id,disabled));
+  });
+  app.post("/api/publishing-workspaces/:id/sync", async (req, res) => res.json(await workspaces().sync(req.params.id)));
   app.put("/api/account-connections/:id", (req, res) => {
     res.json(updateAccountPolicy(store, req.params.id, req.body));
   });
   app.post("/api/account-connections/:id/test", async (req, res) => {
-    store.require<Account>("accounts", req.params.id);
-    const accounts = await provider.accounts();
-    syncProviderAccounts(store, accounts);
+    const account = store.require<Account>("accounts", req.params.id);
+    const accounts = await workspaces().client(account.workspaceId).accounts();
+    syncProviderAccounts(store, accounts, account.workspaceId);
     res.json(accountViews(store).find(a => a.id === req.params.id));
   });
   app.post("/api/leads", (req, res) => {

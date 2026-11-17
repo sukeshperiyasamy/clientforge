@@ -1,0 +1,9 @@
+FROM node:24-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci && mkdir -p /app/data && chown node:node /app/data
+COPY server ./server
+COPY shared ./shared
+ENV PUBLIC_BIND=0.0.0.0 PUBLIC_PORT=3001 DATA_DIR=/app/data
+USER node
+CMD ["npm","run","start:public"]

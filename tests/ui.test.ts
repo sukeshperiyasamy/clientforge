@@ -90,6 +90,19 @@ test("owner setup, connections dashboard, search, setup instructions and respons
       `Mobile overflow: ${JSON.stringify(widths)}`,
     );
     await page.screenshot({ path: "docs/connections-mobile.jpg" });
+    await page.getByLabel("Connection name", { exact:true }).fill("Business Buffer");
+    await page.getByRole("combobox", { name:"Account platform", exact:true }).selectOption("buffer");
+    await page.getByRole("button",{name:"Add account slot",exact:true}).click();
+    await page.getByRole("button",{name:"Verify Business Buffer",exact:true}).waitFor();
+    await page.goto(base+"/acquisition");
+    await page.getByRole("heading",{name:"Client acquisition",exact:true}).waitFor();
+    await page.getByLabel("Title",{exact:true}).fill("Test website opportunity");
+    await page.getByLabel("Source",{exact:true}).fill("Manual approved listing");
+    await page.getByLabel("Original URL",{exact:true}).fill("https://example.com/jobs/ui-test");
+    await page.getByLabel("Requirements",{exact:true}).fill("A business needs a responsive website with an inquiry form.");
+    await page.getByRole("button",{name:"Import for review",exact:true}).click();
+    await page.getByRole("heading",{name:"Test website opportunity",exact:true}).waitFor();
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1));
     await page.getByRole("button", { name: "Toggle navigation" }).click();
     await page
       .getByRole("button", { name: "Sign out of dashboard", exact: true })

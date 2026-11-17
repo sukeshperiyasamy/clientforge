@@ -44,6 +44,14 @@ export async function generate(
   settings: Settings,
   focus = "",
 ) {
+  const result = await structuredGenerate(generatedSchema, makePrompt(project, selected, settings, focus));
+  if (result.posts.length !== selected.length || new Set(result.posts.map(p => p.platform)).size !== selected.length || result.posts.some(p => !selected.includes(p.platform)))
+    throw new Error("Generated platforms do not match the request. No drafts were saved.");
+  for (const post of result.posts) if ([...post.content].length > platforms.find(p => p.id === post.platform)!.limit)
+    throw new Error(`${post.platform} draft exceeds the application character limit.`);
+  return result;
+}
+export async function structuredGenerate<T extends z.ZodType>(schema: T, prompt: string): Promise<z.infer<T>> {
   const cwd = join(config.dataDir, "agent-workspace");
   mkdirSync(cwd, { recursive: true });
   const sessionSettings = JSON.stringify({
@@ -66,7 +74,7 @@ export async function generate(
     "--output-format",
     "stream-json",
     "--json-schema",
-    JSON.stringify(z.toJSONSchema(generatedSchema)),
+    JSON.stringify(z.toJSONSchema(schema)),
     "--settings",
     sessionSettings,
     "--mode",
@@ -146,7 +154,7 @@ export async function generate(
     child.stdin.end(
       JSON.stringify({
         event: "user",
-        message: { content: makePrompt(project, selected, settings, focus) },
+        message: { content: prompt },
       }) + "\n",
     );
   });
@@ -177,22 +185,5 @@ export async function generate(
     }
   }
   if (typeof raw === "string") raw = JSON.parse(raw);
-  const result = generatedSchema.parse(raw);
-  if (
-    result.posts.length !== selected.length ||
-    new Set(result.posts.map((p) => p.platform)).size !== selected.length ||
-    result.posts.some((p) => !selected.includes(p.platform))
-  )
-    throw new Error(
-      "Generated platforms do not match the request. No drafts were saved.",
-    );
-  for (const post of result.posts)
-    if (
-      [...post.content].length >
-      platforms.find((p) => p.id === post.platform)!.limit
-    )
-      throw new Error(
-        `${post.platform} draft exceeds the application character limit. Try generating again.`,
-      );
-  return result;
+  return schema.parse(raw);
 }

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start:public": "tsx server/public-index.ts",
     "dev": "tsx server/index.ts",
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts --production",
@@ -12,6 +13,7 @@
   },
   "dependencies": {
     "express": "^5.1.0",
+    "fast-xml-parser": "^5.12.1",
     "lucide-react": "^0.468.0",
     "playwright": "^1.58.0",
     "react": "^19.1.0",

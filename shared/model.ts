@@ -207,6 +207,7 @@ export type Asset = {
   createdAt: string;
 };
 export type Account = {
+  workspaceId?: string;
   isDefault?: boolean;
   id: string;
   name: string;
@@ -228,6 +229,7 @@ export type Post = {
   updatedAt: string;
 };
 export type Job = {
+  workspaceId?: string;
   id: string;
   postId: string;
   accountId: string;

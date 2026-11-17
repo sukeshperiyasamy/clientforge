@@ -1,4 +1,4 @@
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   connectors,
@@ -67,9 +67,37 @@ export class Connections {
     public browser = new BrowserClient(),
     public postiz = new PostizProvider(),
     public request: typeof fetch = fetch,
-  ) {}
+  ) {
+    if (!store.get("migrations", "native-connection-slots-v1")) store.transaction(() => {
+      for (const platform of ["github", "youtube", "buffer"]) {
+        const record = store.get<ConnectionRecord>("connections", platform);
+        if (record || vault.get(`tokens:${platform}`)) this.save({ ...this.record(platform), platform, label: "Original account" });
+      }
+      store.put("migrations", { id: "native-connection-slots-v1", appliedAt: now() });
+    });
+  }
+  connector(id: string) {
+    const platform = this.store.get<ConnectionRecord>("connections", id)?.platform || id;
+    const c = getConnector(platform);
+    if (!c) throw new HttpError(404, "Connector not found.");
+    return c;
+  }
+  add(platform: string, label: string) {
+    if (!["github", "youtube", "buffer"].includes(platform)) throw new HttpError(400, "Independent slots currently support GitHub, YouTube and Buffer.");
+    const id = randomUUID();
+    const base = this.record(platform);
+    return this.save({ ...base, id, platform, label, identity: undefined, revision: 0,
+      status: "Not Connected", lastAuth: null, lastCheck: null, accountName: null,
+      remoteIds: [], disabled: false, lastError: null });
+  }
+  slots() {
+    return this.store.all<ConnectionRecord>("connections").filter(r => r.platform).map(r => ({
+      ...r, expiresAt: this.vault.get<Tokens>(`tokens:${r.id}`)?.expiresAt || null,
+      scopes: this.vault.get<Tokens>(`tokens:${r.id}`)?.scope || "",
+    }));
+  }
   record(id: string): ConnectionRecord {
-    const c = getConnector(id);
+    const c = this.connector(id);
     if (!c) throw new HttpError(404, "Connector not found.");
     return (
       this.store.get<ConnectionRecord>("connections", id) || {
@@ -102,9 +130,11 @@ export class Connections {
     return this.store.put("connections", record);
   }
   async connect(id: string, sessionId: string, origin: string) {
-    const c = getConnector(id);
+    const c = this.connector(id);
     if (!c) throw new HttpError(404, "Connector not found.");
     const current = this.record(id);
+    if ((c.adapter === "github" || c.adapter === "youtube") && this.store.all<Flow>("oauth_flows").some(f => this.connector(f.connectorId).id === c.id && f.expiresAt > Date.now()))
+      throw new HttpError(409, "Finish or wait for the active platform authorization before starting another account.");
     const revision = (current.revision || 0) + 1;
     this.save({
       ...current,
@@ -123,7 +153,7 @@ export class Connections {
       const verifier = randomBytes(32).toString("base64url");
       const binding = randomBytes(32).toString("base64url");
       const ticket = randomBytes(32).toString("base64url");
-      const redirectUri = `${origin}/auth/${id}/callback`;
+      const redirectUri = `${origin}/auth/${c.id}/callback`;
       const flow: Flow = {
         id: hash(state),
         connectorId: id,
@@ -166,7 +196,7 @@ export class Connections {
       });
       this.store.put("oauth_starts", { id: hash(ticket), flowId: flow.id });
       await this.browser.open(
-        `${origin}/auth/${id}/start?ticket=${encodeURIComponent(ticket)}`,
+        `${origin}/auth/${c.id}/start?ticket=${encodeURIComponent(ticket)}`,
       );
       this.store.audit("connection.oauth_started", id);
       return {
@@ -203,7 +233,7 @@ export class Connections {
     );
     if (!start) throw new HttpError(400, "Connection link expired.");
     const flow = this.store.get<Flow>("oauth_flows", start.flowId);
-    if (!flow || flow.connectorId !== id || flow.expiresAt < Date.now())
+    if (!flow || this.connector(flow.connectorId).id !== id || flow.expiresAt < Date.now())
       throw new HttpError(400, "Connection link expired.");
     const secret = this.vault.get<{ binding: string; url: string }>(
       `flow:${flow.id}`,
@@ -214,6 +244,8 @@ export class Connections {
   }
   async callback(id: string, binding: string, state: string, code: string) {
     const flow = this.store.get<Flow>("oauth_flows", hash(state));
+    const platform = id;
+    if (flow && this.connector(flow.connectorId).id === platform) id = flow.connectorId;
     const owner = flow
       ? this.store.get<{ expires: number }>("owner_sessions", flow.sessionId)
       : undefined;
@@ -246,14 +278,14 @@ export class Connections {
       redirect_uri: flow.redirectUri,
       code_verifier: verifier,
       client_id:
-        process.env[id === "github" ? "GITHUB_CLIENT_ID" : "GOOGLE_CLIENT_ID"]!,
+        process.env[platform === "github" ? "GITHUB_CLIENT_ID" : "GOOGLE_CLIENT_ID"]!,
       client_secret:
         process.env[
-          id === "github" ? "GITHUB_CLIENT_SECRET" : "GOOGLE_CLIENT_SECRET"
+          platform === "github" ? "GITHUB_CLIENT_SECRET" : "GOOGLE_CLIENT_SECRET"
         ]!,
     });
     const endpoint =
-      id === "github"
+      platform === "github"
         ? "https://github.com/login/oauth/access_token"
         : "https://oauth2.googleapis.com/token";
     const data = await this.tokenRequest(endpoint, body);
@@ -263,11 +295,24 @@ export class Connections {
         "The connection changed during authorization. Start a new flow.",
       );
     const previous = this.vault.get<Tokens>(`tokens:${id}`);
+    const identity = await this.identity(platform, data.accessToken);
+    const current = this.record(id);
+    if (current.disabled || current.revision !== flow.revision) throw new HttpError(409, "Connection changed during identity verification.");
+    if (current.identity && current.identity !== identity) throw new HttpError(409, "A different provider account was selected. Add a new connection slot instead.");
+    this.save({ ...current, identity });
     this.vault.set(`tokens:${id}`, {
       ...data,
       refreshToken: data.refreshToken || previous?.refreshToken,
     });
     return this.check(id);
+  }
+  async identity(platform: string, token: string): Promise<string> {
+    if (platform === "github") {
+      const user = z.object({ id: z.number() }).parse(await this.authenticatedJson("https://api.github.com/user", token));
+      return String(user.id);
+    }
+    const data = z.object({ items: z.array(z.object({ id: z.string() })).min(1) }).parse(await this.authenticatedJson("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true", token));
+    return data.items.map(i => i.id).sort().join(",");
   }
   async tokenRequest(endpoint: string, body: URLSearchParams): Promise<Tokens> {
     const response = await this.request(endpoint, {
@@ -298,6 +343,7 @@ export class Connections {
     };
   }
   async tokens(id: string) {
+    const platform = this.connector(id).id;
     const revision = this.record(id).revision;
     let tokens = this.vault.get<Tokens>(`tokens:${id}`);
     if (!tokens)
@@ -316,15 +362,15 @@ export class Connections {
         refresh_token: tokens.refreshToken,
         client_id:
           process.env[
-            id === "github" ? "GITHUB_CLIENT_ID" : "GOOGLE_CLIENT_ID"
+            platform === "github" ? "GITHUB_CLIENT_ID" : "GOOGLE_CLIENT_ID"
           ] || "",
         client_secret:
           process.env[
-            id === "github" ? "GITHUB_CLIENT_SECRET" : "GOOGLE_CLIENT_SECRET"
+            platform === "github" ? "GITHUB_CLIENT_SECRET" : "GOOGLE_CLIENT_SECRET"
           ] || "",
       });
       const refreshed = await this.tokenRequest(
-        id === "github"
+        platform === "github"
           ? "https://github.com/login/oauth/access_token"
           : "https://oauth2.googleapis.com/token",
         body,
@@ -370,7 +416,7 @@ export class Connections {
     return response.json();
   }
   async check(id: string): Promise<ConnectionRecord> {
-    const c = getConnector(id);
+    const c = this.connector(id);
     if (!c) throw new HttpError(404, "Connector not found.");
     const current = this.record(id);
     if (current.disabled)
@@ -400,6 +446,8 @@ export class Connections {
             ),
           );
         accountName = user.login;
+        remoteIds = [String(user.id)];
+        if (current.identity && current.identity !== String(user.id)) throw new CheckError("Verification Required", "Provider identity changed. Use a new connection slot.");
         via = "GitHub GET /user (read-only)";
       } else if (c.adapter === "youtube") {
         const t = await this.tokens(id);
@@ -425,6 +473,7 @@ export class Connections {
           );
         accountName = data.items[0].snippet.title;
         remoteIds = data.items.map((c) => c.id);
+        if (current.identity && current.identity !== remoteIds.slice().sort().join(",")) throw new CheckError("Verification Required", "YouTube identity changed. Add a new slot.");
         via = "YouTube channels.list mine=true (read-only)";
       } else if (c.adapter === "buffer") {
         const t = await this.tokens(id);
@@ -506,6 +555,7 @@ export class Connections {
       }
       const updated = saveCurrent({
         ...current,
+        identity: c.id === "github" || c.id === "youtube" ? remoteIds.slice().sort().join(",") : current.identity,
         status: "Connected",
         lastAuth: now(),
         lastCheck: now(),
@@ -544,21 +594,28 @@ export class Connections {
       return updated;
     }
   }
-  async setBufferKey(key: string) {
-    const current = this.record("buffer");
+  async setBufferKey(key: string, id = "buffer") {
+    if (this.connector(id).id !== "buffer") throw new HttpError(400, "Not a Buffer connection.");
+    const current = this.record(id);
+    const previous = this.vault.get<Tokens>(`tokens:${id}`);
     this.save({
       ...current,
       revision: (current.revision || 0) + 1,
       disabled: false,
     });
-    this.vault.set("tokens:buffer", { accessToken: key });
-    return this.check("buffer");
+    this.vault.set(`tokens:${id}`, { accessToken: key });
+    const verified = await this.check(id);
+    if (current.remoteIds.length && verified.status === "Connected" && current.remoteIds.slice().sort().join(",") !== verified.remoteIds.slice().sort().join(",")) {
+      if (previous) this.vault.set(`tokens:${id}`, previous); else this.vault.remove(`tokens:${id}`);
+      this.save(current);
+      throw new HttpError(409, "Buffer organization changed. Add a new connection slot.");
+    }
+    return verified;
   }
   async disconnect(id: string) {
-    const c = getConnector(id);
+    const c = this.connector(id);
     if (!c) throw new HttpError(404, "Connector not found.");
     const current = this.record(id);
-    const tokens = this.vault.get<Tokens>(`tokens:${id}`);
     this.save({
       ...current,
       revision: (current.revision || 0) + 1,
@@ -572,45 +629,7 @@ export class Connections {
       this.store.remove("oauth_flows", flow.id);
       this.vault.remove(`flow:${flow.id}`);
     }
-    let revocation =
-      "Local authorization removed. Sign out of the website yourself; browser sessions were not erased.";
-    if (tokens && (id === "github" || id === "youtube")) {
-      try {
-        const r =
-          id === "youtube"
-            ? await this.request("https://oauth2.googleapis.com/revoke", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/x-www-form-urlencoded",
-                },
-                body: new URLSearchParams({
-                  token: tokens.refreshToken || tokens.accessToken,
-                }),
-                signal: AbortSignal.timeout(15000),
-                redirect: "error",
-              })
-            : await this.request(
-                `https://api.github.com/applications/${encodeURIComponent(process.env.GITHUB_CLIENT_ID || "")}/token`,
-                {
-                  method: "DELETE",
-                  headers: {
-                    Authorization: `Basic ${Buffer.from(`${process.env.GITHUB_CLIENT_ID}:${process.env.GITHUB_CLIENT_SECRET}`).toString("base64")}`,
-                    "Content-Type": "application/json",
-                    Accept: "application/vnd.github+json",
-                  },
-                  body: JSON.stringify({ access_token: tokens.accessToken }),
-                  signal: AbortSignal.timeout(15000),
-                  redirect: "error",
-                },
-              );
-        revocation = r.ok
-          ? "Provider authorization revoked; local token removed. Browser login is separate."
-          : "Local token removed. Remote revocation could not be confirmed; revoke access in provider settings.";
-      } catch {
-        revocation =
-          "Local token removed. Remote revocation could not be confirmed; revoke access in provider settings.";
-      }
-    }
+    const revocation = "Local authorization removed. Browser sessions were retained. Provider access was not revoked because another account slot may share its authorization grant. Review connected apps in provider settings before revoking access manually.";
     this.vault.remove(`tokens:${id}`);
     this.store.transaction(() => {
       for (const accountId of current.remoteIds) {

@@ -17,16 +17,26 @@ export class ProviderError extends Error {
   }
 }
 export class PostizProvider {
+  constructor(public workspace?: { id: string; url: string; key: string }) {}
+  localId(id: string) { return this.workspace ? `${this.workspace.id}:${Buffer.from(id).toString("base64url")}` : id; }
+  remoteId(id: string) {
+    if (!this.workspace) return id;
+    const prefix = `${this.workspace.id}:`;
+    if (!id.startsWith(prefix)) throw new ProviderError("Account does not belong to the selected workspace.");
+    return Buffer.from(id.slice(prefix.length), "base64url").toString("utf8");
+  }
   async request(
     path: string,
     init: RequestInit = {},
     mayPublish = false,
   ): Promise<unknown> {
-    if (!config.postizKey)
+    const key = this.workspace?.key ?? config.postizKey;
+    const baseUrl = this.workspace?.url ?? config.postizUrl;
+    if (!key)
       throw new ProviderError(
         "Postiz is not configured. Add POSTIZ_API_KEY to .env and restart.",
       );
-    const u = new URL(config.postizUrl);
+    const u = new URL(baseUrl);
     if (
       u.protocol !== "https:" &&
       !["localhost", "127.0.0.1"].includes(u.hostname)
@@ -34,9 +44,9 @@ export class PostizProvider {
       throw new ProviderError("Use HTTPS for a remote Postiz server.");
     let response: Response;
     try {
-      response = await fetch(`${config.postizUrl}${path}`, {
+      response = await fetch(`${baseUrl}${path}`, {
         ...init,
-        headers: { ...init.headers, Authorization: config.postizKey },
+        headers: { ...init.headers, Authorization: key },
         redirect: "error",
         signal: AbortSignal.timeout(45000),
       });
@@ -85,7 +95,8 @@ export class PostizProvider {
       )
       .parse(await this.request("/integrations"));
     return data.map((a) => ({
-      id: a.id,
+      id: this.localId(a.id),
+      workspaceId: this.workspace?.id,
       name: a.name,
       platform: a.identifier,
       disabled: a.disabled ?? false,
@@ -117,7 +128,7 @@ export class PostizProvider {
           tags: [],
           posts: [
             {
-              integration: { id: job.accountId },
+              integration: { id: this.remoteId(job.accountId) },
               value: [{ content: job.snapshot.content, image: media }],
               settings,
             },
@@ -132,7 +143,7 @@ export class PostizProvider {
     if (
       !parsed.success ||
       parsed.data.length !== 1 ||
-      parsed.data[0].integration !== job.accountId
+      parsed.data[0].integration !== this.remoteId(job.accountId)
     )
       throw new ProviderError(
         "Postiz accepted the request but returned unexpected identifiers. Reconcile before resubmitting.",
@@ -165,8 +176,8 @@ export class PostizProvider {
       );
     const matches = raw.posts.filter((p) =>
       job.remoteId
-        ? p.id === job.remoteId
-        : p.integration.id === job.accountId &&
+        ? p.id === job.remoteId && p.integration.id === this.remoteId(job.accountId)
+        : p.integration.id === this.remoteId(job.accountId) &&
           p.content === job.snapshot.content,
     );
     if (matches.length !== 1)

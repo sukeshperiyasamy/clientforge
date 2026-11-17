@@ -440,6 +440,9 @@ export const connectors: Connector[] = [
 export const getConnector = (id: string) => connectors.find((c) => c.id === id);
 export type ConnectionRecord = {
   id: string;
+  platform?: string;
+  label?: string;
+  identity?: string;
   status: ConnectionStatus;
   authMethod: string;
   lastAuth: string | null;

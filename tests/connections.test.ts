@@ -14,6 +14,7 @@ import {
   sanitizedUrl,
 } from "../server/browser/manager.ts";
 import { PostizProvider, ProviderError } from "../server/postiz.ts";
+import { Workspaces } from "../server/workspaces.ts";
 
 const root = mkdtempSync(join(tmpdir(), "freelancegrowth-security-"));
 const securityDir = join(root, "security");
@@ -38,6 +39,21 @@ function fixture() {
   const browser = new FakeBrowser();
   return { store, vault, browser };
 }
+test("publishing workspace keys stay encrypted and job routing preserves the legacy client", () => {
+  const {store,vault}=fixture();const legacy=new PostizProvider();const manager=new Workspaces(store,vault,legacy);
+  const one=manager.add({name:"First",url:"https://example.com/public/v1",key:"synthetic-workspace-one"});
+  const two=manager.add({name:"Second",url:"https://example.org/public/v1",key:"synthetic-workspace-two"});
+  assert(!JSON.stringify(store.all("vault")).includes("synthetic-workspace"));
+  assert(!JSON.stringify(manager.list()).includes("synthetic-workspace"));
+  assert.equal(manager.forJob({workspaceId:one.id} as any).workspace?.key,"synthetic-workspace-one");
+  assert.equal(manager.forJob({workspaceId:two.id} as any).workspace?.key,"synthetic-workspace-two");
+  assert.equal(manager.forJob({} as any),legacy);
+  store.put("jobs",{id:"queued",workspaceId:one.id,status:"scheduled"});store.put("jobs",{id:"submitted",workspaceId:one.id,status:"submitted"});
+  manager.disable(one.id,true);
+  assert.equal(store.require<any>("jobs","queued").status,"cancelled");assert.equal(store.require<any>("jobs","submitted").status,"submitted");
+  assert.throws(()=>manager.forJob({workspaceId:one.id} as any),/disabled/);
+  assert.doesNotThrow(()=>manager.forJob({workspaceId:two.id} as any));store.close();
+});
 test("all requested platforms exist exactly once and manual entries have no enabled API actions", () => {
   const ids = [
     "linkedin",
@@ -247,6 +263,55 @@ test("Buffer GraphQL errors cannot fabricate a successful connection", async () 
   assert.equal(record.status, "Verification Required");
   assert.equal(record.lastAuth, null);
   store.close();
+});
+test("native account slots isolate tokens and disconnect without revoking another slot", async () => {
+  const { store, vault, browser } = fixture();
+  let revocations = 0;
+  const service = new Connections(store, vault, browser, new PostizProvider(), (async (url, options) => {
+    if (options?.method === "DELETE") revocations++;
+    const token = (options?.headers as any).Authorization;
+    return response({ id: token.endsWith("one") ? 1 : 2, login: token.endsWith("one") ? "one" : "two" });
+  }) as typeof fetch);
+  const one = service.add("github", "First"); const two = service.add("github", "Second");
+  vault.set(`tokens:${one.id}`, { accessToken: "synthetic-one" });
+  vault.set(`tokens:${two.id}`, { accessToken: "synthetic-two" });
+  assert.equal((await service.check(one.id)).accountName, "one");
+  assert.equal((await service.check(two.id)).accountName, "two");
+  await service.disconnect(one.id);
+  assert.equal(vault.get(`tokens:${one.id}`), undefined);
+  assert.equal((await service.check(two.id)).status, "Connected");
+  assert.equal(revocations, 0);
+  store.close();
+});
+test("OAuth callback is bound to the slot and reconnect cannot switch its provider identity", async () => {
+  const { store, vault, browser } = fixture();
+  const auth = new OwnerAuth(store); auth.setup("synthetic-slot-oauth-passphrase");
+  const login = auth.login("synthetic-slot-oauth-passphrase", "slots");
+  const before = { id: process.env.GITHUB_CLIENT_ID, secret: process.env.GITHUB_CLIENT_SECRET };
+  process.env.GITHUB_CLIENT_ID="fixture"; process.env.GITHUB_CLIENT_SECRET="fixture";
+  let remoteIdentity = 1;
+  const service=new Connections(store,vault,browser,new PostizProvider(),(async url => String(url).includes("access_token") ? response({access_token:"candidate-token"}) : response({id:remoteIdentity,login:"fixture"})) as typeof fetch);
+  const slot=service.add("github","Primary"); const other=service.add("github","Other");
+  try {
+    await service.connect(slot.id,login.session.id,"http://localhost:3000");
+    await assert.rejects(service.connect(other.id,login.session.id,"http://localhost:3000"),/active platform/);
+    const link=new URL(browser.opened.at(-1)!);
+    const start=service.startOAuth("github",link.searchParams.get("ticket")!);
+    const state=new URL(start.url).searchParams.get("state")!;
+    await assert.rejects(service.callback("youtube",start.binding,state,"wrong-provider"));
+    assert.equal((await service.callback("github",start.binding,state,"code")).id,slot.id);
+    assert.equal(vault.get(`tokens:${other.id}`),undefined);
+    assert.equal(service.record(slot.id).identity,"1");
+    await service.connect(slot.id,login.session.id,"http://localhost:3000");
+    const second=new URL(browser.opened.at(-1)!); const next=service.startOAuth("github",second.searchParams.get("ticket")!);
+    remoteIdentity=2;
+    await assert.rejects(service.callback("github",next.binding,new URL(next.url).searchParams.get("state")!,"code"),/different provider account/);
+    assert.equal(service.record(slot.id).identity,"1");
+  } finally {
+    if(before.id===undefined) delete process.env.GITHUB_CLIENT_ID; else process.env.GITHUB_CLIENT_ID=before.id;
+    if(before.secret===undefined) delete process.env.GITHUB_CLIENT_SECRET; else process.env.GITHUB_CLIENT_SECRET=before.secret;
+    store.close();
+  }
 });
 test("OAuth works across the dedicated browser and survives backend recreation; replay and wrong browser fail", async () => {
   const db = join(root, "oauth.sqlite");
